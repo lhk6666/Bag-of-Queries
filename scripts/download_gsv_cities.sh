@@ -39,7 +39,7 @@ fi
 # Download the dataset
 echo "Downloading gsv-cities dataset from Kaggle..."
 echo "To path: $download_path"
-kaggle datasets download "amaralibey/gsv-cities" -p "$download_path" --unzip
+kaggle datasets download "amaralibey/gsv-cities" -p "$download_path" --unzip 
 
 if [ $? -eq 0 ]; then
     echo "GSV-Cities downloaded successfully to $download_path."

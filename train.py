@@ -5,8 +5,6 @@
 #
 # See LICENSE file in the project root.
 # ----------------------------------------------------------------------------
-
-import argparse
 import torch
 from lightning.pytorch import callbacks
 from lightning.pytorch import Trainer, seed_everything
@@ -17,48 +15,7 @@ from src.backbones import DinoV2, ResNet
 from src.boq import BoQ
 from src.model import BoQModel
 from src.dataloaders.datamodule import VPRDataModule
-
-class HyperParams:
-    def __init__(self):
-        ## Backbone config:
-        self.backbone_name: str = "dinov2_vitb14"    # resnet18, resnet50, dinov2_vits14, dinov2_vitl14
-        self.unfreeze_n_blocks: int = 2              # number of blocks to unfreeze in the backbone
-        
-        ## BoQ config:
-        self.channel_proj: int = 512
-        self.num_queries: int = 64
-        self.num_layers: int = 2
-        self.output_dim: int = 8192
-        
-        ## Datasets:
-        # NOTE: if you already have OpenVPRLab, you can set the path to the datasets from there
-        # otherwise use the dowload scripts in `scripts/` to download to `data/` folder 
-        self.gsv_cities_path: str = "../OpenVPRLab/data/train/gsv-cities"    # path to gsv-cities in OpenVPRLab
-        # gsv_cities_path: str = "./data/train/gsv-cities"                   # or path to gsv-cities in this project
-        
-        self.cities: str | list = "all" # train on all cities
-        # self.cities: str | list = ["Bangkok", "Boston", "PRS"] # train on a subset of cities (check the gsv-cities folder)
-        
-        self.val_sets: dict = {
-            "msls-val":     "./data/val/msls-val",              # path to the msls-val dataset
-            "pitts30k-val": "./data/val/pitts30k-val",          # path to the pitts30k-val dataset
-        }
-        
-        ## Training config:
-        self.batch_size: int = 128           # batch size is the number of places per batch
-        self.img_per_place: int = 4          # number of images per place
-        self.max_epochs: int = 40
-        self.warmup_epochs: int = 10         # number of linear warmup epochs (not iterations)
-        self.lr: float = 1e-4                # learning rate
-        self.weight_decay: float = 1e-4
-        self.lr_mul: float = 0.1
-        self.milestones: list = [10, 20]
-        self.num_workers: int = 8
-        
-        ## misc
-        self.silent: bool = False            # disable console output
-        self.compile: bool = False           # compile the model using torch.compile() [experimental]
-        self.seed: int = 2024                # random seed for reproducibility
+from utils import hyper_params_getter
 
 def train(hparams, dev_mode=False):
     seed_everything(hparams.seed, workers=True)
@@ -177,57 +134,7 @@ def train(hparams, dev_mode=False):
     trainer.fit(model=model, datamodule=datamodule)
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train parameters")
-
-    parser.add_argument("--dev",      action="store_true", help="Enable fast dev run (one train and validation iteration).")
-    parser.add_argument("--silent",   action="store_true", help="Disable console output.")
-    parser.add_argument('--compile',  action='store_true', help='Compile the model using torch.compile()')
-    
-    parser.add_argument("--seed",   type=int,   help="Random seed for reproducibility.")
-    
-    parser.add_argument("--bs",     type=int,   help="Batch size.")
-    parser.add_argument("--lr",     type=float, help="Learning Rate.")
-    parser.add_argument("--wd",     type=float, help="Weight Decay.")
-    
-    parser.add_argument('--epochs', type=int, help='Maximum number of epochs')
-    parser.add_argument('--warmup', type=int, help='Number of warmup epochs')
-    parser.add_argument("--nw",     type=int, help="Numbers of workers.")
-
-    parser.add_argument('--backbone',   type=str, help='Backbone model name [resnet50, dinov2]')
-    parser.add_argument('--unfreeze_n', type=int, help='Number of blocks to unfreeze in the backbone.')
-    parser.add_argument("--dim",        type=int, help="Output dimensionality.")
-
-    return parser.parse_args()
-
-
 if __name__ == "__main__":
-    args = parse_args()
-    hparams = HyperParams()
+    hparams = hyper_params_getter()
     
-    if args.seed:
-        hparams.seed = args.seed
-    if args.compile:
-        hparams.compile = True
-    if args.silent:
-        hparams.silent = True
-    if args.bs:
-        hparams.batch_size = args.bs
-    if args.lr:
-        hparams.lr = args.lr
-    if args.wd:
-        hparams.weight_decay = args.wd
-    if args.epochs:
-        hparams.max_epochs = args.epochs
-    if args.warmup:
-        hparams.warmup_epochs = args.warmup
-    if args.nw:
-        hparams.num_workers = args.nw
-    if args.backbone:
-        hparams.backbone_name = args.backbone
-    if args.unfreeze_n:
-        hparams.unfreeze_n_blocks = args.unfreeze_n
-    if args.dim:
-        hparams.output_dim = args.dim
-    
-    train(hparams, dev_mode=args.dev)
+    train(hparams, dev_mode=hparams.dev)
