@@ -1,6 +1,9 @@
 import torch
 import torch
 from utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ
+import time
+import os
+import shutil
 
 def main(path, ckpt, rank):
     hparams = hyper_params_getter()
@@ -22,10 +25,44 @@ def main(path, ckpt, rank):
     index.add(ref_embs_np)
 
     distances, indices = index.search(query_np, rank)
-    print("Top-{} indices: {}".format(rank, indices[0]))
+    print("Input image number: {}".format(path.split("/")[-1]))
+    print("Top-{} image number: {}".format(rank, indices[0] + 1))
     print("Top-{} distances: {}".format(rank, distances[0]))
+    image_saver(indices, path)
+
+def image_saver(indices,path):
+    # Create a new directory to store matching images
+    
+    # Create experiment folder with incremental naming
+    experiment_dir = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/embeddings/trials"
+    dirs = [d for d in os.listdir(experiment_dir) if d.startswith("trial_") and os.path.isdir(os.path.join(experiment_dir, d))]
+    next_num = 1
+    if dirs:
+        nums = [int(d.split("_")[1]) for d in dirs if d.split("_")[1].isdigit()]
+        if nums:
+            next_num = max(nums) + 1
+    
+    save_dir = os.path.join(experiment_dir, f"trial_{next_num}")
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Copy matched images
+    source_dir = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/winter"
+    for rank, idx in enumerate(indices[0], 1):
+        img_name = "images-{:05d}.png".format(idx + 1)  
+        rank_img_name = f"{rank}_{img_name}"  # Add rank number to beginning of filename
+        source_path = os.path.join(source_dir, img_name)
+        if os.path.exists(source_path):
+            shutil.copy(source_path, os.path.join(save_dir, rank_img_name))
+            print(f"Copied {img_name} to {save_dir} as {rank_img_name}")
+        else:
+            print(f"Warning: Image {img_name} not found in source directory")
+    shutil.copy(path, os.path.join(save_dir, path.split("/")[-1]))
+    
 
 if __name__ == "__main__":
     ckpt = "logs/dinov2_vitb14/version_0/checkpoints/epoch[19]_R@1[0.9311]_R@5[0.9581].ckpt"
-    path = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/summer/images-11210.png"
+    image_numer = int(input("Please input the image number: "))
+    path = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/summer/images-{:05d}.png".format(image_numer)
+    start_time = time.time()
     main(path, ckpt, rank=5)
+    print("Time taken: {:.2f} seconds".format(time.time() - start_time))
