@@ -5,7 +5,7 @@ import time
 import os
 import shutil
 
-def main(path, ckpt, rank):
+def main(path, ckpt, rank ,start_time):
     hparams = hyper_params_getter()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = load_model(hparams, ckpt, device)
@@ -28,9 +28,11 @@ def main(path, ckpt, rank):
     print("Input image number: {}".format(path.split("/")[-1]))
     print("Top-{} image number: {}".format(rank, indices[0] + 1))
     print("Top-{} distances: {}".format(rank, distances[0]))
-    image_saver(indices, path)
+    end_time = time.time()
+    time_taken = end_time - start_time
+    image_saver(indices, path, time_taken)
 
-def image_saver(indices,path):
+def image_saver(indices,path, time_taken):
     # Create a new directory to store matching images
     
     # Create experiment folder with incremental naming
@@ -57,6 +59,10 @@ def image_saver(indices,path):
         else:
             print(f"Warning: Image {img_name} not found in source directory")
     shutil.copy(path, os.path.join(save_dir, path.split("/")[-1]))
+    time_taken_file = os.path.join(save_dir, "time_taken.txt")
+    with open(time_taken_file, "w") as f:
+        f.write(f"Time taken for the search: {time_taken:.2f} seconds")
+    print("Time taken: {:.2f} seconds".format(time.time() - start_time))
     
 
 if __name__ == "__main__":
@@ -64,5 +70,4 @@ if __name__ == "__main__":
     image_numer = int(input("Please input the image number: "))
     path = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/summer/images-{:05d}.png".format(image_numer)
     start_time = time.time()
-    main(path, ckpt, rank=5)
-    print("Time taken: {:.2f} seconds".format(time.time() - start_time))
+    main(path, ckpt, rank=5, start_time=start_time)

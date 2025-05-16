@@ -17,6 +17,8 @@ class IndexIVFPQ():
         self.nbits = nbits
         self.index = faiss.IndexIVFPQ(self.quantizer, d, nlist, m, nbits)
         self.index.nprobe = nprobe
+        res = faiss.StandardGpuResources()
+        self.index = faiss.index_cpu_to_gpu(res, 0, self.index)
 
     def train(self, ref_embs):
         self.index.train(ref_embs)
