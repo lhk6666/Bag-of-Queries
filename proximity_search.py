@@ -5,11 +5,10 @@ import time
 import os
 import shutil
 
-def main(path, ckpt, rank ,start_time):
+def main(ckpt, rank):
     hparams = hyper_params_getter()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = load_model(hparams, ckpt, device)
-    emb = infer_single_image(model, path, device)
     ref_embs = torch.load("embeddings/nordland_winter.pt", weights_only=True)
     ref_embs_np = ref_embs.detach().cpu().numpy().astype('float32')
     if ref_embs_np.ndim == 3 and ref_embs_np.shape[1] == 1:
@@ -17,20 +16,29 @@ def main(path, ckpt, rank ,start_time):
     N, D = ref_embs_np.shape
     print(f"Reshaped reference embeddings to shape: {ref_embs_np.shape}")
 
-    query_np  = emb.detach().cpu().numpy().astype('float32')
-
-    index = IndexIVFPQ(nlist=4096, m=16, nbits=8, nprobe=20, k=rank, d=D)
+    index = IndexIVFPQ(nlist=900, m=16, nbits=8, nprobe=20, k=rank, d=D)
 
     index.train(ref_embs_np)
     index.add(ref_embs_np)
+    print(f"Index trained and added {N} reference embeddings with dimension {D}")
 
-    distances, indices = index.search(query_np, rank)
-    print("Input image number: {}".format(path.split("/")[-1]))
-    print("Top-{} image number: {}".format(rank, indices[0] + 1))
-    print("Top-{} distances: {}".format(rank, distances[0]))
-    end_time = time.time()
-    time_taken = end_time - start_time
-    image_saver(indices, path, time_taken)
+    while True:
+        try:
+            image_numer = int(input("Please input the image number: "))
+            path = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/summer/images-{:05d}.png".format(image_numer)
+            emb = infer_single_image(model, path, device)
+            query_np  = emb.detach().cpu().numpy().astype('float32')
+            start_time = time.time()
+            distances, indices = index.search(query_np, rank)
+            print("Input image number: {}".format(path.split("/")[-1]))
+            print("Top-{} image number: {}".format(rank, indices[0] + 1))
+            print("Top-{} distances: {}".format(rank, distances[0]))
+            end_time = time.time()
+            time_taken = end_time - start_time
+            image_saver(indices, path, time_taken)
+        except KeyboardInterrupt:
+            print("Exiting the program.")
+            break
 
 def image_saver(indices,path, time_taken):
     # Create a new directory to store matching images
@@ -62,12 +70,9 @@ def image_saver(indices,path, time_taken):
     time_taken_file = os.path.join(save_dir, "time_taken.txt")
     with open(time_taken_file, "w") as f:
         f.write(f"Time taken for the search: {time_taken:.2f} seconds")
-    print("Time taken: {:.2f} seconds".format(time.time() - start_time))
+    print("Time taken: {:.5f} seconds".format(time_taken))
     
 
 if __name__ == "__main__":
     ckpt = "logs/dinov2_vitb14/version_0/checkpoints/epoch[19]_R@1[0.9311]_R@5[0.9581].ckpt"
-    image_numer = int(input("Please input the image number: "))
-    path = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/summer/images-{:05d}.png".format(image_numer)
-    start_time = time.time()
-    main(path, ckpt, rank=5, start_time=start_time)
+    main(ckpt, rank=5)
