@@ -16,6 +16,7 @@ class IndexIVFPQ():
         self.m = m
         self.nbits = nbits
         self.index = faiss.IndexIVFPQ(self.quantizer, d, nlist, m, nbits)
+        self.index.use_precomputed_table = True
         self.index.nprobe = nprobe
         res = faiss.StandardGpuResources()
         self.index = faiss.index_cpu_to_gpu(res, 0, self.index)
@@ -31,7 +32,6 @@ class IndexIVFPQ():
         return distances, indices
 
 def load_model(hparams, ckpt_path: str, device: str = "cuda:0"):
-    # 从 checkpoint 恢复模型
     if "dinov2" in hparams.backbone_name:
         backbone = DinoV2(backbone_name=hparams.backbone_name, unfreeze_n_blocks=hparams.unfreeze_n_blocks)
         train_img_size = (224, 224)

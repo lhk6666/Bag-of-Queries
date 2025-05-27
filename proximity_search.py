@@ -19,7 +19,7 @@ def main(path, ckpt, rank ,start_time):
 
     query_np  = emb.detach().cpu().numpy().astype('float32')
 
-    index = IndexIVFPQ(nlist=512, m=16, nbits=8, nprobe=10, k=rank, d=D)
+    index = IndexIVFPQ(nlist=4096, m=16, nbits=8, nprobe=20, k=rank, d=D)
 
     index.train(ref_embs_np)
     index.add(ref_embs_np)
