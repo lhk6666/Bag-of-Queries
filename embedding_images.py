@@ -6,7 +6,7 @@ import glob
 from utils import load_model, infer_single_image, hyper_params_getter
 from config.models import ModelName
 
-def embed_all_images_in_directory(model, directory_path, name, device="cuda:0", output_dir="/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/embeddings"):
+def embed_all_images_in_directory(model, directory_path, name, device="cuda:0", output_dir="/home/dragon_llm/daikin/daikin_ws/src/boq/embeddings"):
     emb_list = []
     os.makedirs(output_dir, exist_ok=True)
     
@@ -41,9 +41,9 @@ def main(path):
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     model = load_model(hparams, ckpt, device)
-    embed_all_images_in_directory(model, path, name='nordland_winter', device=device, output_dir="/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/embeddings/" + model_name)
+    embed_all_images_in_directory(model, path, name='nordland_winter', device=device, output_dir="/home/dragon_llm/daikin/daikin_ws/src/boq/embeddings/" + model_name)
 
 if __name__ == "__main__":
-    nordland_path = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/image/Nordland/ref"
+    nordland_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/ref"
 
     main(nordland_path)

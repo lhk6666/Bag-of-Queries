@@ -26,7 +26,7 @@ def main(ckpt, rank, model_name):
     print(f"Index trained and added {N} reference embeddings with dimension {D}")
 
     # Process all query images in the folder
-    query_folder = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/image/Nordland/query"
+    query_folder = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/query"
 
     query_images = sorted(glob.glob(os.path.join(query_folder, "*.jpg")))
     
@@ -60,7 +60,7 @@ def main(ckpt, rank, model_name):
         # Assuming ground truth is the same image number in reference set
         # Load ground truth mapping if not already loaded
         if 'gt_mapping' not in locals():
-            gt_file = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/image/Nordland/ground_truth_new.npy"
+            gt_file = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/ground_truth_new.npy"
             gt_data = np.load(gt_file, allow_pickle=True)
             gt_mapping = gt_data[:, -1]  # Get the last column with ground truth indices
         
@@ -77,6 +77,7 @@ def main(ckpt, rank, model_name):
             correct_r10 += 1
         
         if (i + 1) % 100 == 0:
+            print(indices)
             print(f"Processed {i + 1}/{total_queries} images")
     
     # Calculate metrics
@@ -101,7 +102,7 @@ def main(ckpt, rank, model_name):
     result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10)
 
 def result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10):
-    experiment_dir = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/embeddings/trials"
+    experiment_dir = "/home/dragon_llm/daikin/daikin_ws/src/boq/embeddings/trials"
     dirs = [d for d in os.listdir(experiment_dir) if d.startswith("trial_") and os.path.isdir(os.path.join(experiment_dir, d))]
     next_num = 1
     if dirs:

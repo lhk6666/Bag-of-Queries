@@ -7,6 +7,7 @@ from PIL import Image
 import argparse
 from config.hyperparams import HyperParams
 import faiss
+import cv2
 
 class IndexIVFPQ():
     def __init__(self, nlist, m, nbits, nprobe, k , d):
@@ -86,9 +87,15 @@ def build_transform(backbone_name: str):
     ])
 
 @torch.no_grad()
-def infer_single_image(model: BoQModel, img_path: str, device: str = "cuda:0"):
+def infer_single_image(model: BoQModel, img_input, device: str = "cuda:0"):
     tf = build_transform(model.backbone.backbone_name)
-    img = Image.open(img_path).convert("RGB")
+    
+    if isinstance(img_input, str):
+        img = Image.open(img_input).convert("RGB")
+    else:
+        img = cv2.cvtColor(img_input, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(img)
+    
     x = tf(img).unsqueeze(0).to(device)   # [1,3,H,W]
     output = model(x)
     embedding = output[0] if isinstance(output, tuple) else output  

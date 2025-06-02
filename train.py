@@ -1,7 +1,7 @@
 # ----------------------------------------------------------------------------
 # Copyright (c) 2024 Amar Ali-bey
 #
-# https://github.com/amaralibey/Bag-of-Queries
+# https://github.com/amaralibey/boq
 #
 # See LICENSE file in the project root.
 # ----------------------------------------------------------------------------
