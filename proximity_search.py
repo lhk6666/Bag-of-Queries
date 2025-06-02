@@ -3,47 +3,104 @@ import torch
 from utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ
 import time
 import os
-import shutil
+import glob
+import numpy as np
+from config.models import ModelName
 
-def main(ckpt, rank):
+def main(ckpt, rank, model_name):
     hparams = hyper_params_getter()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = load_model(hparams, ckpt, device)
-    ref_embs = torch.load("embeddings/nordland_winter.pt", weights_only=True)
+    # ref_embs = torch.load("embeddings/nordland_winter_slotmask_2700.pt", weights_only=True)
+    ref_embs = torch.load("embeddings/" + model_name + "/nordland_winter.pt", weights_only=True)
     ref_embs_np = ref_embs.detach().cpu().numpy().astype('float32')
     if ref_embs_np.ndim == 3 and ref_embs_np.shape[1] == 1:
         ref_embs_np = ref_embs_np.reshape(ref_embs_np.shape[0], ref_embs_np.shape[2])
     N, D = ref_embs_np.shape
     print(f"Reshaped reference embeddings to shape: {ref_embs_np.shape}")
 
-    index = IndexIVFPQ(nlist=900, m=16, nbits=8, nprobe=20, k=rank, d=D)
+    index = IndexIVFPQ(nlist=700, m=16, nbits=8, nprobe=100, k=rank, d=D)
 
     index.train(ref_embs_np)
     index.add(ref_embs_np)
     print(f"Index trained and added {N} reference embeddings with dimension {D}")
 
-    while True:
-        try:
-            image_numer = int(input("Please input the image number: "))
-            path = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/summer/images-{:05d}.png".format(image_numer)
-            emb = infer_single_image(model, path, device)
-            query_np  = emb.detach().cpu().numpy().astype('float32')
-            start_time = time.time()
-            distances, indices = index.search(query_np, rank)
-            print("Input image number: {}".format(path.split("/")[-1]))
-            print("Top-{} image number: {}".format(rank, indices[0] + 1))
-            print("Top-{} distances: {}".format(rank, distances[0]))
-            end_time = time.time()
-            time_taken = end_time - start_time
-            image_saver(indices, path, time_taken)
-        except KeyboardInterrupt:
-            print("Exiting the program.")
-            break
+    # Process all query images in the folder
+    query_folder = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/image/Nordland/query"
 
-def image_saver(indices,path, time_taken):
-    # Create a new directory to store matching images
+    query_images = sorted(glob.glob(os.path.join(query_folder, "*.jpg")))
     
-    # Create experiment folder with incremental naming
+    print(f"Found {len(query_images)} query images")
+    
+    # Initialize metrics
+    total_time = 0
+    correct_r1 = 0
+    correct_r5 = 0
+    correct_r10 = 0
+    total_queries = len(query_images)
+    
+    for i, image_path in enumerate(query_images):
+        # Extract image number from filename (assuming format images-xxxxx.png)
+        image_name = os.path.basename(image_path)
+        image_number = int(image_name.split('-')[0].split('.')[0])
+        
+        # Get query embedding
+        emb = infer_single_image(model, image_path, device)
+        query_np = emb.detach().cpu().numpy().astype('float32')
+        
+        # Search
+        start_time = time.time()
+        distances, indices = index.search(query_np, 10)  # Get top-10 for R@10 calculation
+        end_time = time.time()
+        
+        search_time = end_time - start_time
+        total_time += search_time
+        
+        # Check if ground truth is in top-k results
+        # Assuming ground truth is the same image number in reference set
+        # Load ground truth mapping if not already loaded
+        if 'gt_mapping' not in locals():
+            gt_file = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/image/Nordland/ground_truth_new.npy"
+            gt_data = np.load(gt_file, allow_pickle=True)
+            gt_mapping = gt_data[:, -1]  # Get the last column with ground truth indices
+        
+        # Get ground truth indices for current query image
+        ground_truth_indices = list(gt_mapping[image_number])
+        
+        top_indices = indices[0]
+        # Check if any ground truth index is in top-k results
+        if any(gt_idx in top_indices[:1] for gt_idx in ground_truth_indices):
+            correct_r1 += 1
+        if any(gt_idx in top_indices[:5] for gt_idx in ground_truth_indices):
+            correct_r5 += 1
+        if any(gt_idx in top_indices[:10] for gt_idx in ground_truth_indices):
+            correct_r10 += 1
+        
+        if (i + 1) % 100 == 0:
+            print(f"Processed {i + 1}/{total_queries} images")
+    
+    # Calculate metrics
+    avg_time = total_time / total_queries
+    r1_score = correct_r1 / total_queries
+    r5_score = correct_r5 / total_queries
+    r10_score = correct_r10 / total_queries
+    
+    # Print results
+    print("\n" + "="*50)
+    print("EVALUATION RESULTS")
+    print("="*50)
+    print(f"Total queries processed: {total_queries}")
+    print(f"Average processing time per query: {avg_time:.5f} seconds")
+    print(f"Total processing time: {total_time:.2f} seconds")
+    print(f"R@1: {r1_score:.4f} ({correct_r1}/{total_queries})")
+    print(f"R@5: {r5_score:.4f} ({correct_r5}/{total_queries})")
+    print(f"R@10: {r10_score:.4f} ({correct_r10}/{total_queries})")
+    print("="*50)
+    
+    # Save results
+    result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10)
+
+def result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10):
     experiment_dir = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/embeddings/trials"
     dirs = [d for d in os.listdir(experiment_dir) if d.startswith("trial_") and os.path.isdir(os.path.join(experiment_dir, d))]
     next_num = 1
@@ -55,24 +112,24 @@ def image_saver(indices,path, time_taken):
     save_dir = os.path.join(experiment_dir, f"trial_{next_num}")
     os.makedirs(save_dir, exist_ok=True)
     
-    # Copy matched images
-    source_dir = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/winter"
-    for rank, idx in enumerate(indices[0], 1):
-        img_name = "images-{:05d}.png".format(idx + 1)  
-        rank_img_name = f"{rank}_{img_name}"  # Add rank number to beginning of filename
-        source_path = os.path.join(source_dir, img_name)
-        if os.path.exists(source_path):
-            shutil.copy(source_path, os.path.join(save_dir, rank_img_name))
-            print(f"Copied {img_name} to {save_dir} as {rank_img_name}")
-        else:
-            print(f"Warning: Image {img_name} not found in source directory")
-    shutil.copy(path, os.path.join(save_dir, path.split("/")[-1]))
-    time_taken_file = os.path.join(save_dir, "time_taken.txt")
-    with open(time_taken_file, "w") as f:
-        f.write(f"Time taken for the search: {time_taken:.2f} seconds")
-    print("Time taken: {:.5f} seconds".format(time_taken))
+    results_file = os.path.join(save_dir, "evaluation_results.txt")
+    with open(results_file, "w") as f:
+        f.write("="*50 + "\n")
+        f.write("EVALUATION RESULTS\n")
+        f.write("="*50 + "\n")
+        f.write(f"Total queries processed: {total_queries}\n")
+        f.write(f"Average processing time per query: {avg_time:.5f} seconds\n")
+        f.write(f"Total processing time: {total_time:.2f} seconds\n")
+        f.write(f"R@1: {r1_score:.4f} ({correct_r1}/{total_queries})\n")
+        f.write(f"R@5: {r5_score:.4f} ({correct_r5}/{total_queries})\n")
+        f.write(f"R@10: {r10_score:.4f} ({correct_r10}/{total_queries})\n")
+        f.write("="*50 + "\n")
     
+    print(f"Results saved to: {results_file}")
 
 if __name__ == "__main__":
-    ckpt = "logs/dinov2_vitb14/version_0/checkpoints/epoch[19]_R@1[0.9311]_R@5[0.9581].ckpt"
-    main(ckpt, rank=5)
+    all_models = [name for name in dir(ModelName) if callable(getattr(ModelName, name)) and not name.startswith('__')]
+    model_name = input("Please select one model below: " + "\n" + str(all_models) + "\n")
+    func = getattr(ModelName, model_name)
+    ckpt = func(ModelName)
+    main(ckpt, rank=10, model_name=model_name)

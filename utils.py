@@ -46,7 +46,7 @@ def load_model(hparams, ckpt_path: str, device: str = "cuda:0"):
         val_img_size = (384, 384)
         hparams.train_img_size = train_img_size
         hparams.val_img_size = val_img_size
-        
+
     else:
         raise ValueError(f"backbone {hparams.backbone_name} not recognized or not implemented!") 
     
@@ -58,6 +58,7 @@ def load_model(hparams, ckpt_path: str, device: str = "cuda:0"):
         num_queries=hparams.num_queries,
         num_layers=hparams.num_layers,
         row_dim=hparams.output_dim//hparams.channel_proj,
+        slot_mask=hparams.slot_mask,
     )
     model = BoQModel.load_from_checkpoint(
         ckpt_path,
@@ -113,6 +114,8 @@ def parse_args():
     parser.add_argument('--backbone',   type=str, help='Backbone model name [resnet50, dinov2]')
     parser.add_argument('--unfreeze_n', type=int, help='Number of blocks to unfreeze in the backbone.')
     parser.add_argument("--dim",        type=int, help="Output dimensionality.")
+
+    parser.add_argument("--slotmask", type=str, help="Slot mask for the model.")
 
     return parser.parse_args()
 

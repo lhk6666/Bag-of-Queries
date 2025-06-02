@@ -22,5 +22,7 @@ embeddings/
 # Cache files
 .cache/
 
+# Datasets
+image/
 
 dev.ipynb

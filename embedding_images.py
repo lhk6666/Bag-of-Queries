@@ -1,19 +1,12 @@
 # inference.py
 import torch
-from PIL import Image
-from torchvision import transforms
-from lightning.pytorch import Trainer
-from src.model import BoQModel
-from src.backbones import DinoV2, ResNet
-from src.boq import BoQ
-import argparse
 import os
 from tqdm import tqdm
 import glob
-from config.hyperparams import HyperParams
 from utils import load_model, infer_single_image, hyper_params_getter
+from config.models import ModelName
 
-def embed_all_images_in_directory(model, directory_path, name, device="cuda:0", output_dir="embeddings"):
+def embed_all_images_in_directory(model, directory_path, name, device="cuda:0", output_dir="/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/embeddings"):
     emb_list = []
     os.makedirs(output_dir, exist_ok=True)
     
@@ -40,14 +33,17 @@ def embed_all_images_in_directory(model, directory_path, name, device="cuda:0", 
 
 def main(path):
     hparams = hyper_params_getter()
-    ckpt = "logs/dinov2_vitb14/version_0/checkpoints/epoch[19]_R@1[0.9311]_R@5[0.9581].ckpt"
+    all_models = [name for name in dir(ModelName) if callable(getattr(ModelName, name)) and not name.startswith('__')]
+    model_name = input("Please select one model below: " + "\n" + str(all_models) + "\n")
+    func = getattr(ModelName, model_name)
+    ckpt = func(ModelName)
+    print(f"Loading model {model_name} from checkpoint {ckpt}")
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     model = load_model(hparams, ckpt, device)
-    # emb = infer_single_image(model, "image/000000_pitch1_yaw1.jpg", device)
-    embed_all_images_in_directory(model, path, name='nordland_winter', device=device)
-    # torch.save(emb, "output_embedding.pt")
+    embed_all_images_in_directory(model, path, name='nordland_winter', device=device, output_dir="/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/embeddings/" + model_name)
 
 if __name__ == "__main__":
-    nordland_path = "/home/dragon_llm/daikin/daikin_ws/src/VPR-datasets-downloader/datasets/nordland/raw_data/winter"
+    nordland_path = "/home/dragon_llm/daikin/daikin_ws/src/Bag-of-Queries/image/Nordland/ref"
+
     main(nordland_path)

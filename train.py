@@ -19,6 +19,7 @@ from utils import hyper_params_getter
 
 def train(hparams, dev_mode=False):
     seed_everything(hparams.seed, workers=True)
+    torch.set_float32_matmul_precision("high") 
     
     # Instantiate the backbone and define the image size for training and validation
     if "dinov2" in hparams.backbone_name:
@@ -35,7 +36,6 @@ def train(hparams, dev_mode=False):
         val_img_size = (384, 384)
         hparams.train_img_size = train_img_size
         hparams.val_img_size = val_img_size
-        
     else:
         raise ValueError(f"backbone {hparams.backbone_name} not recognized or not implemented!") 
     
@@ -47,6 +47,7 @@ def train(hparams, dev_mode=False):
         num_queries=hparams.num_queries,
         num_layers=hparams.num_layers,
         row_dim=hparams.output_dim//hparams.channel_proj,
+        slot_mask=hparams.slot_mask,
     )
     
     # Define the entire Lightning model for training and validation
