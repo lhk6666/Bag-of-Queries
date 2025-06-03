@@ -156,5 +156,12 @@ def hyper_params_getter():
         hparams.output_dim = args.dim
     if args.dev:
         hparams.dev_mode = args.dev
+    if args.slotmask:
+        if args.slotmask.lower() == "true":
+            hparams.slot_mask = True
+        elif args.slotmask.lower() == "false":
+            hparams.slot_mask = False
+        else:
+            raise ValueError("slotmask should be either 'true' or 'false'")
     
     return hparams

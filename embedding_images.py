@@ -10,21 +10,16 @@ def embed_all_images_in_directory(model, directory_path, name, device="cuda:0", 
     emb_list = []
     os.makedirs(output_dir, exist_ok=True)
     
-    # Get all image files (assuming jpg, png, jpeg extensions)
     image_files = []
     for ext in ['*.jpg', '*.png', '*.jpeg']:
         image_files.extend(glob.glob(os.path.join(directory_path, ext)))
     
     print(f"Found {len(image_files)} images in {directory_path}")
     
-    # Process each image
     for img_path in tqdm(sorted(image_files), desc="Embedding images"):
         try:
-            
-            # Get embedding
             emb = infer_single_image(model, img_path, device)
             emb_list.append(emb)
-            # Save embedding
         except Exception as e:
             print(f"Error processing {img_path}: {e}")
     all_emb = torch.stack(emb_list, dim=0)

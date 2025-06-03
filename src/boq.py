@@ -80,6 +80,7 @@ class BoQ(torch.nn.Module):
         self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
         self.norm_input = torch.nn.LayerNorm(proj_channels)
         
+        self.slot_mask = slot_mask
         in_dim = proj_channels
         if slot_mask:
             self.boqs = torch.nn.ModuleList([
@@ -99,8 +100,10 @@ class BoQ(torch.nn.Module):
         outs = []
         attns = []
         for i in range(len(self.boqs)):
-            x, out, attn, _ = self.boqs[i](x)
-            # x, out, attn = self.boqs[i](x)
+            if self.slot_mask:
+                x, out, attn, _ = self.boqs[i](x)
+            else:
+                x, out, attn = self.boqs[i](x)
             outs.append(out)
             attns.append(attn)
 
