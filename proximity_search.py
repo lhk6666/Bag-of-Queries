@@ -77,7 +77,6 @@ def main(ckpt, rank, model_name):
             correct_r10 += 1
         
         if (i + 1) % 100 == 0:
-            print(indices)
             print(f"Processed {i + 1}/{total_queries} images")
     
     # Calculate metrics

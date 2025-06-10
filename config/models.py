@@ -7,3 +7,6 @@ class ModelName:
     
     def slot_mask_mlp(self):
         return "logs/dinov2_vitb14/version_17/checkpoints/epoch[15]_R@1[0.9311]_R@5[0.9622].ckpt"
+    
+    def slot_mask_mlp_2(self):
+        return "logs/dinov2_vitb14/version_25/checkpoints/epoch[21]_R@1[0.9338]_R@5[0.9622].ckpt"

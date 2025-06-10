@@ -54,6 +54,13 @@ class BoQBlockWithMask(torch.nn.Module):
 
         self.slot_mask_mlp = torch.nn.Linear(in_dim, num_queries)
 
+        # hidden_dim = in_dim // 2
+        # self.slot_mask_mlp = torch.nn.Sequential(
+        #     torch.nn.Linear(in_dim, hidden_dim),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Linear(hidden_dim, num_queries)
+        # )
+
     def forward(self, x):
         B = x.size(0)
         x = self.encoder(x)
