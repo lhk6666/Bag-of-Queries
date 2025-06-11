@@ -10,6 +10,7 @@ class HyperParams:
         self.num_layers: int = 2
         self.output_dim: int = 8192
         self.slot_mask: bool = True  # use slot mask in BoQ
+        self.mlp: bool = True  # use MLP for slot mask in BoQ
         
         ## Datasets:
         # NOTE: if you already have OpenVPRLab, you can set the path to the datasets from there
@@ -26,7 +27,7 @@ class HyperParams:
         }
         
         ## Training config:
-        self.batch_size: int = 128           # batch size is the number of places per batch
+        self.batch_size: int = 64           # batch size is the number of places per batch
         self.img_per_place: int = 4          # number of images per place
         self.max_epochs: int = 40
         self.warmup_epochs: int = 10         # number of linear warmup epochs (not iterations)

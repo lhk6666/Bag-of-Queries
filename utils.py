@@ -60,6 +60,7 @@ def load_model(hparams, ckpt_path: str, device: str = "cuda:0"):
         num_layers=hparams.num_layers,
         row_dim=hparams.output_dim//hparams.channel_proj,
         slot_mask=hparams.slot_mask,
+        mlp=hparams.mlp,
     )
     model = BoQModel.load_from_checkpoint(
         ckpt_path,
@@ -123,6 +124,7 @@ def parse_args():
     parser.add_argument("--dim",        type=int, help="Output dimensionality.")
 
     parser.add_argument("--slotmask", type=str, help="Slot mask for the model.")
+    parser.add_argument("--mlp", type=str, help="Use MLP for slot mask in BoQ.")
 
     return parser.parse_args()
 
@@ -163,5 +165,12 @@ def hyper_params_getter():
             hparams.slot_mask = False
         else:
             raise ValueError("slotmask should be either 'true' or 'false'")
+    if args.mlp:
+        if args.mlp.lower() == "true":
+            hparams.mlp = True
+        elif args.mlp.lower() == "false":
+            hparams.mlp = False
+        else:
+            raise ValueError("mlp should be either 'true' or 'false'")
     
     return hparams

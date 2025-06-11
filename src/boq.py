@@ -41,7 +41,7 @@ class BoQBlock(torch.nn.Module):
         return x, out, attn.detach()
     
 class BoQBlockWithMask(torch.nn.Module):
-    def __init__(self, in_dim, num_queries, nheads=8):
+    def __init__(self, in_dim, num_queries, nheads=8, mlp=True):
         super().__init__()
         self.encoder = torch.nn.TransformerEncoderLayer(d_model=in_dim, nhead=nheads, dim_feedforward=4*in_dim, batch_first=True, dropout=0.)
         self.queries = torch.nn.Parameter(torch.randn(1, num_queries, in_dim))
@@ -50,9 +50,11 @@ class BoQBlockWithMask(torch.nn.Module):
         self.cross_attn = torch.nn.MultiheadAttention(in_dim, num_heads=nheads, batch_first=True)
         self.norm_out = torch.nn.LayerNorm(in_dim)
 
-        # self.slot_mask = torch.nn.Parameter(torch.ones(num_queries)) 
-
-        self.slot_mask_mlp = torch.nn.Linear(in_dim, num_queries)
+        self.mlp = mlp
+        if not mlp:
+            self.slot_mask = torch.nn.Parameter(torch.ones(num_queries)) 
+        else:
+            self.slot_mask = torch.nn.Linear(in_dim, num_queries)
 
         # hidden_dim = in_dim // 2
         # self.slot_mask_mlp = torch.nn.Sequential(
@@ -70,11 +72,12 @@ class BoQBlockWithMask(torch.nn.Module):
         out, attn = self.cross_attn(q, x, x)
         out = self.norm_out(out)
 
-        # mask = torch.sigmoid(self.slot_mask)[None, :, None]  # [1, num_queries, 1]
-
-        global_feat = x.mean(dim=1)
-        mask = torch.sigmoid(self.slot_mask_mlp(global_feat))  # [B, num_queries, 1]
-        mask = mask[:, :, None]  # [B, num_queries, 1]
+        if not self.mlp:
+            mask = torch.sigmoid(self.slot_mask)[None, :, None]  # [1, num_queries, 1]
+        else:
+            global_feat = x.mean(dim=1)
+            mask = torch.sigmoid(self.slot_mask_mlp(global_feat))  # [B, num_queries, 1]
+            mask = mask[:, :, None]  # [B, num_queries, 1]
 
         out = out * mask           # [B, num_queries, in_dim]
 
@@ -82,7 +85,7 @@ class BoQBlockWithMask(torch.nn.Module):
 
 
 class BoQ(torch.nn.Module):
-    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True):
+    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=True):
         super().__init__()
         self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
         self.norm_input = torch.nn.LayerNorm(proj_channels)
@@ -91,7 +94,7 @@ class BoQ(torch.nn.Module):
         in_dim = proj_channels
         if slot_mask:
             self.boqs = torch.nn.ModuleList([
-                BoQBlockWithMask(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])
+                BoQBlockWithMask(in_dim, num_queries, nheads=in_dim//64, mlp=mlp) for _ in range(num_layers)])
         else:
             self.boqs = torch.nn.ModuleList([
                 BoQBlock(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])
