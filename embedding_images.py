@@ -40,5 +40,6 @@ def main(path):
 
 if __name__ == "__main__":
     nordland_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/ref"
+    # oo66_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/0066_3_3_1/0066_3*3*1"
 
     main(nordland_path)

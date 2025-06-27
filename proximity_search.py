@@ -7,32 +7,103 @@ import glob
 import numpy as np
 from config.models import ModelName
 
-def main(ckpt, rank, model_name):
-    hparams = hyper_params_getter()
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    model = load_model(hparams, ckpt, device)
-    # ref_embs = torch.load("embeddings/nordland_winter_slotmask_2700.pt", weights_only=True)
-    ref_embs = torch.load("embeddings/" + model_name + "/nordland_winter.pt", weights_only=True)
-    ref_embs_np = ref_embs.detach().cpu().numpy().astype('float32')
-    if ref_embs_np.ndim == 3 and ref_embs_np.shape[1] == 1:
-        ref_embs_np = ref_embs_np.reshape(ref_embs_np.shape[0], ref_embs_np.shape[2])
-    N, D = ref_embs_np.shape
-    print(f"Reshaped reference embeddings to shape: {ref_embs_np.shape}")
-
-    index = IndexIVFPQ(nlist=700, m=16, nbits=8, nprobe=100, k=rank, d=D)
-
-    index.train(ref_embs_np)
-    index.add(ref_embs_np)
-    print(f"Index trained and added {N} reference embeddings with dimension {D}")
-
-    # Process all query images in the folder
-    query_folder = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/query"
-
-    query_images = sorted(glob.glob(os.path.join(query_folder, "*.jpg")))
+class ProximitySearcher:
+    def __init__(self, ckpt, model_name, device=None):
+        self.hparams = hyper_params_getter()
+        self.device = device if device else ("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.model = load_model(self.hparams, ckpt, self.device)
+        self.model_name = model_name
+        self.index = None
+        self.ref_embs_np = None
+        self.gt_mapping = None
+        
+    def load_reference_embeddings(self, embedding_path=None):
+        if embedding_path is None:
+            embedding_path = f"embeddings/{self.model_name}/nordland_winter.pt"
+        
+        ref_embs = torch.load(embedding_path, weights_only=True)
+        self.ref_embs_np = ref_embs.detach().cpu().numpy().astype('float32')
+        
+        if self.ref_embs_np.ndim == 3 and self.ref_embs_np.shape[1] == 1:
+            self.ref_embs_np = self.ref_embs_np.reshape(self.ref_embs_np.shape[0], self.ref_embs_np.shape[2])
+        
+        N, D = self.ref_embs_np.shape
+        print(f"Loaded reference embeddings with shape: {self.ref_embs_np.shape}")
+        return N, D
     
+    def build_index(self, nlist=700, m=16, nbits=8, nprobe=100, k=10):
+        if self.ref_embs_np is None:
+            raise ValueError("Please load reference embeddings first")
+        
+        N, D = self.ref_embs_np.shape
+        self.index = IndexIVFPQ(nlist=nlist, m=m, nbits=nbits, nprobe=nprobe, k=k, d=D)
+        print('test')
+        self.index.train(self.ref_embs_np)
+        print('test')
+        self.index.add(self.ref_embs_np)
+        print(f"Index trained and added {N} reference embeddings with dimension {D}")
+    
+    def load_ground_truth(self, gt_file=None):
+        if gt_file is None:
+            gt_file = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/ground_truth_new.npy"
+        
+        gt_data = np.load(gt_file, allow_pickle=True)
+        self.gt_mapping = gt_data[:, -1]
+        print(f"Loaded ground truth mapping with {len(self.gt_mapping)} entries")
+    
+    def search_single_image(self, image_path=None, image=None, top_k=10):
+        if self.index is None:
+            raise ValueError("Please build index first")
+        
+        start_time = time.time()
+        
+        if image_path is not None:
+            emb = infer_single_image(self.model, image_path, self.device)
+        elif image is not None:
+            emb = infer_single_image(self.model, image, self.device)
+        query_np = emb.detach().cpu().numpy().astype('float32')
+        
+        distances, indices = self.index.search(query_np, top_k)
+        
+        end_time = time.time()
+        search_time = end_time - start_time
+        
+        return {
+            'distances': distances[0],
+            'indices': indices[0],
+            'search_time': search_time
+        }
+    
+    def evaluate_single_image(self, image_path, image_number=None):
+        if self.gt_mapping is None:
+            self.load_ground_truth()
+        
+        if image_number is None:
+            image_name = os.path.basename(image_path)
+            image_number = int(image_name.split('-')[0].split('.')[0])
+        
+        result = self.search_single_image(image_path, top_k=10)
+        
+        ground_truth_indices = list(self.gt_mapping[image_number])
+        
+        top_indices = result['indices']
+        r1 = any(gt_idx in top_indices[:1] for gt_idx in ground_truth_indices)
+        r5 = any(gt_idx in top_indices[:5] for gt_idx in ground_truth_indices)
+        r10 = any(gt_idx in top_indices[:10] for gt_idx in ground_truth_indices)
+        
+        return {
+            'search_result': result,
+            'ground_truth_indices': ground_truth_indices,
+            'r1': r1,
+            'r5': r5,
+            'r10': r10,
+            'image_number': image_number
+        }
+
+def batch_evaluation(searcher, query_folder, rank=10):
+    query_images = sorted(glob.glob(os.path.join(query_folder, "*.jpg")))
     print(f"Found {len(query_images)} query images")
     
-    # Initialize metrics
     total_time = 0
     correct_r1 = 0
     correct_r5 = 0
@@ -40,52 +111,24 @@ def main(ckpt, rank, model_name):
     total_queries = len(query_images)
     
     for i, image_path in enumerate(query_images):
-        # Extract image number from filename (assuming format images-xxxxx.png)
-        image_name = os.path.basename(image_path)
-        image_number = int(image_name.split('-')[0].split('.')[0])
+        result = searcher.evaluate_single_image(image_path)
         
-        # Get query embedding
-        emb = infer_single_image(model, image_path, device)
-        query_np = emb.detach().cpu().numpy().astype('float32')
-        
-        # Search
-        start_time = time.time()
-        distances, indices = index.search(query_np, 10)  # Get top-10 for R@10 calculation
-        end_time = time.time()
-        
-        search_time = end_time - start_time
-        total_time += search_time
-        
-        # Check if ground truth is in top-k results
-        # Assuming ground truth is the same image number in reference set
-        # Load ground truth mapping if not already loaded
-        if 'gt_mapping' not in locals():
-            gt_file = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/ground_truth_new.npy"
-            gt_data = np.load(gt_file, allow_pickle=True)
-            gt_mapping = gt_data[:, -1]  # Get the last column with ground truth indices
-        
-        # Get ground truth indices for current query image
-        ground_truth_indices = list(gt_mapping[image_number])
-        
-        top_indices = indices[0]
-        # Check if any ground truth index is in top-k results
-        if any(gt_idx in top_indices[:1] for gt_idx in ground_truth_indices):
+        total_time += result['search_result']['search_time']
+        if result['r1']:
             correct_r1 += 1
-        if any(gt_idx in top_indices[:5] for gt_idx in ground_truth_indices):
+        if result['r5']:
             correct_r5 += 1
-        if any(gt_idx in top_indices[:10] for gt_idx in ground_truth_indices):
+        if result['r10']:
             correct_r10 += 1
         
         if (i + 1) % 100 == 0:
             print(f"Processed {i + 1}/{total_queries} images")
     
-    # Calculate metrics
     avg_time = total_time / total_queries
     r1_score = correct_r1 / total_queries
     r5_score = correct_r5 / total_queries
     r10_score = correct_r10 / total_queries
     
-    # Print results
     print("\n" + "="*50)
     print("EVALUATION RESULTS")
     print("="*50)
@@ -97,7 +140,6 @@ def main(ckpt, rank, model_name):
     print(f"R@10: {r10_score:.4f} ({correct_r10}/{total_queries})")
     print("="*50)
     
-    # Save results
     result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10)
 
 def result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10):
@@ -127,9 +169,40 @@ def result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_sc
     
     print(f"Results saved to: {results_file}")
 
+def main(ckpt, rank, model_name):
+    searcher = ProximitySearcher(ckpt, model_name)
+    searcher.load_reference_embeddings()
+    searcher.build_index(k=rank)
+    
+    query_folder = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/query"
+    batch_evaluation(searcher, query_folder, rank)
+
+def single_image_demo(ckpt, model_name, image_path=None, image=None):
+    searcher = ProximitySearcher(ckpt, model_name)
+    searcher.load_reference_embeddings(f"embeddings/{model_name}/0066.pt")
+    searcher.build_index(nlist=20, m=4, nbits=8, nprobe=10, k=10)
+    
+    if image is not None:
+        result = searcher.search_single_image(image=image, top_k=10)
+    elif image_path is not None:
+        result = searcher.search_single_image(image_path=image_path, top_k=10)
+
+    return result['indices'], result['distances']
+
 if __name__ == "__main__":
     all_models = [name for name in dir(ModelName) if callable(getattr(ModelName, name)) and not name.startswith('__')]
     model_name = input("Please select one model below: " + "\n" + str(all_models) + "\n")
     func = getattr(ModelName, model_name)
     ckpt = func(ModelName)
-    main(ckpt, rank=10, model_name=model_name)
+    
+    mode = input("Select mode: 1 for batch evaluation, 2 for single image demo: ")
+    
+    if mode == "1":
+        main(ckpt, rank=10, model_name=model_name)
+    elif mode == "2":
+        image_path = input("Enter image path: ")
+        indices, distance = single_image_demo(ckpt, model_name, image_path)
+        print(f"Indices: {indices}")
+        print(f"Distances: {distance}")
+    else:
+        print("Invalid mode selected")

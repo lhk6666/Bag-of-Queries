@@ -10,7 +10,7 @@ class HyperParams:
         self.num_layers: int = 2
         self.output_dim: int = 8192
         self.slot_mask: bool = True  # use slot mask in BoQ
-        self.mlp: bool = True  # use MLP for slot mask in BoQ
+        self.mlp: bool = False  # use MLP for slot mask in BoQ
         
         ## Datasets:
         # NOTE: if you already have OpenVPRLab, you can set the path to the datasets from there
