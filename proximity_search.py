@@ -37,9 +37,7 @@ class ProximitySearcher:
         
         N, D = self.ref_embs_np.shape
         self.index = IndexIVFPQ(nlist=nlist, m=m, nbits=nbits, nprobe=nprobe, k=k, d=D)
-        print('test')
         self.index.train(self.ref_embs_np)
-        print('test')
         self.index.add(self.ref_embs_np)
         print(f"Index trained and added {N} reference embeddings with dimension {D}")
     
