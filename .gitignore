@@ -26,3 +26,6 @@ embeddings/
 image/
 
 dev.ipynb
+
+# Model files
+models/
