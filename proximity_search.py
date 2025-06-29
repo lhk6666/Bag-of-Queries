@@ -177,7 +177,7 @@ def main(ckpt, rank, model_name):
 
 def single_image_demo(ckpt, model_name, image_path=None, image=None):
     searcher = ProximitySearcher(ckpt, model_name)
-    searcher.load_reference_embeddings(f"embeddings/{model_name}/0066.pt")
+    searcher.load_reference_embeddings(f"embeddings/{model_name}/0066_3_3_1.pt")
     searcher.build_index(nlist=20, m=4, nbits=8, nprobe=10, k=10)
     
     if image is not None:
