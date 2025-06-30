@@ -1,4 +1,8 @@
 class ModelName:
+    # trial_193
+    def origin_s(self):
+        return "logs/dinov2_vits14/version_4/checkpoints/epoch[29]_R@1[0.9162]_R@5[0.9581].ckpt"
+    
     # trail_180
     def origin_b(self):
         return "logs/dinov2_vitb14/version_0/checkpoints/epoch[19]_R@1[0.9311]_R@5[0.9581].ckpt"
@@ -19,6 +23,10 @@ class ModelName:
     def slot_mask_b_boqlayer4_nonhiddenlayer(self):
         return "logs/dinov2_vitb14/version_27/checkpoints/epoch[20]_R@1[0.9270]_R@5[0.9595].ckpt"
     
+    # trial_192
+    def slot_mask_mlp_s_boqlayer2_nonhiddenlayer(self):
+        return "logs/dinov2_vits14/version_2/checkpoints/epoch[32]_R@1[0.9216]_R@5[0.9581].ckpt" 
+    
     # trial_175
     def slot_mask_mlp_b_boqlayer2_nonhiddenlayer(self):
         return "logs/dinov2_vitb14/version_17/checkpoints/epoch[15]_R@1[0.9311]_R@5[0.9622].ckpt"
@@ -35,7 +43,7 @@ class ModelName:
     def slot_mask_mlp_l_boqlayer2_nonhiddenlayer(self):
         return "logs/dinov2_vitl14/version_1/checkpoints/epoch[34]_R@1[0.9311]_R@5[0.9635].ckpt"
     
-    # trial_183 **
+    # trial_183
     def slot_mask_mlp_l_boqlayer2_hiddenlayer(self):
         return "logs/dinov2_vitl14/version_6/checkpoints/epoch[13]_R@1[0.9338]_R@5[0.9649].ckpt"
     
