@@ -30,11 +30,11 @@ input_name = sess.get_inputs()[0].name
 
 while True:
     start_time = time.time()
-    ort_out = infer_single_image_edge(dummy_for_pt, device="cuda:0")
+    ort_out = infer_single_image_edge(sess, dummy_for_pt, device="cuda:0")
     print("ONNX Runtime inference time:", time.time() - start_time)
-    start_time = time.time()
-    pt_out = infer_single_image(model, dummy_for_pt, device="cuda:0").cpu().numpy()
-    print("PyTorch inference time:", time.time() - start_time)
+    # start_time = time.time()
+    # pt_out = infer_single_image(model, dummy_for_pt, device="cuda:0").cpu().numpy()
+    # print("PyTorch inference time:", time.time() - start_time)
 
 
-    print("Max diff:", np.abs(pt_out - ort_out).max())
+    # print("Max diff:", np.abs(pt_out - ort_out).max())

@@ -105,7 +105,7 @@ def infer_single_image(model: BoQModel, img_input, device: str = "cuda:0"):
     return embedding.cpu()
 
 @torch.no_grad()
-def infer_single_image_edge(img_input, device: str = "cuda:0"):
+def infer_single_image_edge(sess, img_input, device: str = "cuda:0"):
     tf = build_transform("dinov2")
     
     if isinstance(img_input, str):
@@ -117,7 +117,7 @@ def infer_single_image_edge(img_input, device: str = "cuda:0"):
     dummy_input = tf(img).unsqueeze(0).cpu().numpy().astype(np.float32)
 
 
-    sess = ort.InferenceSession("models/test.onnx", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+    # sess = ort.InferenceSession("models/test.onnx", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 
     input_name = sess.get_inputs()[0].name
     output = sess.run(None, {input_name: dummy_input})[0] 
