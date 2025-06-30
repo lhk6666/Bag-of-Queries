@@ -8,6 +8,8 @@ import argparse
 from config.hyperparams import HyperParams
 import faiss
 import cv2
+import onnx, onnxruntime as ort
+import numpy as np
 
 class IndexIVFPQ():
     def __init__(self, nlist, m, nbits, nprobe, k , d):
@@ -101,6 +103,26 @@ def infer_single_image(model: BoQModel, img_input, device: str = "cuda:0"):
     output = model(x)
     embedding = output[0] if isinstance(output, tuple) else output  
     return embedding.cpu()
+
+@torch.no_grad()
+def infer_single_image_edge(img_input, device: str = "cuda:0"):
+    tf = build_transform("dinov2")
+    
+    if isinstance(img_input, str):
+        img = Image.open(img_input).convert("RGB")
+    else:
+        img = cv2.cvtColor(img_input, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(img)
+    
+    dummy_input = tf(img).unsqueeze(0).cpu().numpy().astype(np.float32)
+
+
+    sess = ort.InferenceSession("models/test.onnx", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+
+    input_name = sess.get_inputs()[0].name
+    output = sess.run(None, {input_name: dummy_input})[0] 
+    return output
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train parameters")

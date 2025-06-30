@@ -1,6 +1,6 @@
 import torch
 import torch
-from utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ
+from utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ, infer_single_image_edge
 import time
 import os
 import glob
