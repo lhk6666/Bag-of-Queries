@@ -54,14 +54,14 @@ class BoQBlockWithMask(torch.nn.Module):
         if not mlp:
             self.slot_mask = torch.nn.Parameter(torch.ones(num_queries)) 
         else:
-            # self.slot_mask = torch.nn.Linear(in_dim, num_queries)
+            self.slot_mask = torch.nn.Linear(in_dim, num_queries)
 
-            hidden_dim = in_dim // 4
-            self.slot_mask = torch.nn.Sequential(
-                torch.nn.Linear(in_dim, hidden_dim),
-                torch.nn.ReLU(),
-                torch.nn.Linear(hidden_dim, num_queries),
-            )
+            # hidden_dim = in_dim // 4
+            # self.slot_mask = torch.nn.Sequential(
+            #     torch.nn.Linear(in_dim, hidden_dim),
+            #     torch.nn.ReLU(),
+            #     torch.nn.Linear(hidden_dim, num_queries),
+            # )
 
     def forward(self, x):
         B = x.size(0)
