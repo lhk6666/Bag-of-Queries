@@ -123,6 +123,73 @@ def infer_single_image_edge(sess, img_input, device: str = "cuda:0"):
     output = sess.run(None, {input_name: dummy_input})[0] 
     return output
 
+# @torch.no_grad()
+# def infer_single_image_trt(engine, img_input):
+#     tf = build_transform("dinov2")
+#     if isinstance(img_input, str):
+#         img = Image.open(img_input).convert("RGB")
+#     else:
+#         img = cv2.cvtColor(img_input, cv2.COLOR_BGR2RGB)
+#         img = Image.fromarray(img)
+#     input_np = tf(img).unsqueeze(0).cpu().numpy().astype(np.float32)
+
+#     # Initialize CUDA context
+#     cuda.init()
+#     cuda_ctx = cuda.Device(0).make_context()
+    
+#     try:
+#         # Get tensor names
+#         io_names = [engine.get_tensor_name(i) for i in range(engine.num_io_tensors)]
+#         input_names = [n for n in io_names if engine.get_tensor_mode(n) == trt.TensorIOMode.INPUT]
+#         output_names = [n for n in io_names if engine.get_tensor_mode(n) == trt.TensorIOMode.OUTPUT]
+#         input_name = input_names[0]
+
+#         context = engine.create_execution_context()
+        
+#         # Allocate GPU memory for input
+#         d_input = cuda.mem_alloc(input_np.nbytes)
+        
+#         # Set input shape and allocate memory for all outputs
+#         context.set_input_shape(input_name, input_np.shape)
+        
+#         output_buffers = {}
+#         output_shapes = {}
+#         for output_name in output_names:
+#             output_shape = context.get_tensor_shape(output_name)
+#             output_size = int(np.prod(output_shape) * np.dtype(np.float32).itemsize)
+#             d_output = cuda.mem_alloc(output_size)
+#             output_buffers[output_name] = d_output
+#             output_shapes[output_name] = output_shape
+        
+#         # Copy input to GPU
+#         cuda.memcpy_htod(d_input, input_np)
+        
+#         # Set tensor addresses for input and all outputs
+#         context.set_tensor_address(input_name, int(d_input))
+#         for output_name in output_names:
+#             context.set_tensor_address(output_name, int(output_buffers[output_name]))
+        
+#         # Create CUDA stream
+#         stream = cuda.Stream()
+        
+#         # Execute inference
+#         context.execute_async_v3(stream.handle)
+#         stream.synchronize()
+        
+#         # Copy first output back to host (assuming you want the first output)
+#         first_output_name = output_names[0]
+#         h_output = np.empty(output_shapes[first_output_name], dtype=np.float32)
+#         cuda.memcpy_dtoh(h_output, output_buffers[first_output_name])
+        
+#         # Free GPU memory
+#         d_input.free()
+#         for d_output in output_buffers.values():
+#             d_output.free()
+        
+#         return h_output
+        
+#     finally:
+#         cuda_ctx.pop()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train parameters")
