@@ -25,12 +25,12 @@ torch.onnx.export(
     model,                          
     dummy_input,                    
     "models/test.onnx",                   
-    export_params=True,             # 是否导出参数
+    export_params=True,        
     opset_version=17,               
-    do_constant_folding=True,       # 是否对常量折叠优化
-    input_names=["input"],          # 输入节点名（可自定义）
-    output_names=["output"],        # 输出节点名
-    dynamic_axes={                  # 可选：开启动态 batch
+    do_constant_folding=True,    
+    input_names=["input"],     
+    output_names=["output"],       
+    dynamic_axes={                  
         "input": {0: "batch_size"},
         "output": {0: "batch_size"}
     }
