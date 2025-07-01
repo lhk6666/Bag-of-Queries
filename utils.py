@@ -33,6 +33,13 @@ class IndexIVFPQ():
     def search(self, query_embs, k):
         distances, indices = self.index.search(query_embs, k)
         return distances, indices
+    
+def load_onnx_model(ckpt_path: str):
+    onnx_model = onnx.load("models/test.onnx")
+    onnx.checker.check_model(onnx_model)
+    sess = ort.InferenceSession(ckpt_path, providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+
+    return sess
 
 def load_model(hparams, ckpt_path: str, device: str = "cuda:0"):
     if "dinov2" in hparams.backbone_name:
@@ -105,7 +112,7 @@ def infer_single_image(model: BoQModel, img_input, device: str = "cuda:0"):
     return embedding.cpu()
 
 @torch.no_grad()
-def infer_single_image_edge(sess, img_input, device: str = "cuda:0"):
+def infer_single_image_edge(sess, img_input):
     tf = build_transform("dinov2")
     
     if isinstance(img_input, str):

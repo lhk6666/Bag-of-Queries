@@ -49,3 +49,6 @@ class ModelName:
     
     def test(self):
         return "logs/dinov2_vitb14/version_34/checkpoints/epoch[32]_R@1[0.9351]_R@5[0.9622].ckpt"
+    
+    def jetson(self):
+        return "models/test.ckpt"

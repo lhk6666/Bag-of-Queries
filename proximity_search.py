@@ -1,6 +1,6 @@
 import torch
 import torch
-from utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ, infer_single_image_edge
+from utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ, infer_single_image_edge, load_onnx_model
 import time
 import os
 import glob
@@ -8,10 +8,14 @@ import numpy as np
 from config.models import ModelName
 
 class ProximitySearcher:
-    def __init__(self, ckpt, model_name, device=None):
+    def __init__(self, ckpt, model_name, device=None, use_onnx=False):
         self.hparams = hyper_params_getter()
+        self.use_onnx = use_onnx
         self.device = device if device else ("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.model = load_model(self.hparams, ckpt, self.device)
+        if not use_onnx:
+            self.model = load_model(self.hparams, ckpt, self.device)
+        else:
+            self.model = load_onnx_model(ckpt)
         self.model_name = model_name
         self.index = None
         self.ref_embs_np = None
@@ -43,7 +47,7 @@ class ProximitySearcher:
     
     def load_ground_truth(self, gt_file=None):
         if gt_file is None:
-            gt_file = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/ground_truth_new.npy"
+            gt_file = "image/Nordland/ground_truth_new.npy"
         
         gt_data = np.load(gt_file, allow_pickle=True)
         self.gt_mapping = gt_data[:, -1]
@@ -56,10 +60,16 @@ class ProximitySearcher:
         start_time = time.time()
         
         if image_path is not None:
-            emb = infer_single_image(self.model, image_path, self.device)
+            if not self.use_onnx:
+                emb = infer_single_image(self.model, image_path, self.device)
+            else:
+                emb = infer_single_image_edge(self.model, image_path)
         elif image is not None:
-            emb = infer_single_image(self.model, image, self.device)
-        query_np = emb.detach().cpu().numpy().astype('float32')
+            if not self.use_onnx:
+                emb = infer_single_image(self.model, image, self.device)
+            else:
+                emb = infer_single_image_edge(self.model, image)
+        query_np = emb.detach().cpu().numpy().astype('float32') if not self.use_onnx else emb.astype('float32')
         
         distances, indices = self.index.search(query_np, top_k)
         
@@ -141,7 +151,7 @@ def batch_evaluation(searcher, query_folder, rank=10):
     result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10)
 
 def result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_score, correct_r1, correct_r5, correct_r10):
-    experiment_dir = "/home/dragon_llm/daikin/daikin_ws/src/boq/embeddings/trials"
+    experiment_dir = "embeddings/trials"
     dirs = [d for d in os.listdir(experiment_dir) if d.startswith("trial_") and os.path.isdir(os.path.join(experiment_dir, d))]
     next_num = 1
     if dirs:
@@ -167,12 +177,12 @@ def result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_sc
     
     print(f"Results saved to: {results_file}")
 
-def main(ckpt, rank, model_name):
-    searcher = ProximitySearcher(ckpt, model_name)
+def main(ckpt, rank, model_name, use_onnx=False):
+    searcher = ProximitySearcher(ckpt, model_name, use_onnx=use_onnx)
     searcher.load_reference_embeddings()
     searcher.build_index(k=rank)
     
-    query_folder = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/Nordland/query"
+    query_folder = "image/Nordland/query"
     batch_evaluation(searcher, query_folder, rank)
 
 def single_image_demo(ckpt, model_name, image_path=None, image=None):
@@ -192,11 +202,14 @@ if __name__ == "__main__":
     model_name = input("Please select one model below: " + "\n" + str(all_models) + "\n")
     func = getattr(ModelName, model_name)
     ckpt = func(ModelName)
+    use_onnx = input("Use ONNX model? (yes/no): ").strip().lower() == "yes"
+    if use_onnx:
+        ckpt = ckpt.replace(".ckpt", ".onnx")
     
     mode = input("Select mode: 1 for batch evaluation, 2 for single image demo: ")
     
     if mode == "1":
-        main(ckpt, rank=10, model_name=model_name)
+        main(ckpt, rank=10, model_name=model_name, use_onnx=use_onnx)
     elif mode == "2":
         image_path = input("Enter image path: ")
         indices, distance = single_image_demo(ckpt, model_name, image_path)
