@@ -41,7 +41,7 @@ class BoQBlock(torch.nn.Module):
         return x, out, attn.detach()
     
 class BoQBlockWithMask(torch.nn.Module):
-    def __init__(self, in_dim, num_queries, nheads=8, mlp=True):
+    def __init__(self, in_dim, num_queries, nheads=8, mlp=True, hidden_layer=False):
         super().__init__()
         self.encoder = torch.nn.TransformerEncoderLayer(d_model=in_dim, nhead=nheads, dim_feedforward=4*in_dim, batch_first=True, dropout=0.)
         self.queries = torch.nn.Parameter(torch.randn(1, num_queries, in_dim))
@@ -54,14 +54,15 @@ class BoQBlockWithMask(torch.nn.Module):
         if not mlp:
             self.slot_mask = torch.nn.Parameter(torch.ones(num_queries)) 
         else:
-            self.slot_mask = torch.nn.Linear(in_dim, num_queries)
-
-            # hidden_dim = in_dim // 4
-            # self.slot_mask = torch.nn.Sequential(
-            #     torch.nn.Linear(in_dim, hidden_dim),
-            #     torch.nn.ReLU(),
-            #     torch.nn.Linear(hidden_dim, num_queries),
-            # )
+            if not hidden_layer:
+                self.slot_mask = torch.nn.Linear(in_dim, num_queries)
+            else:
+                hidden_dim = in_dim // 4
+                self.slot_mask = torch.nn.Sequential(
+                    torch.nn.Linear(in_dim, hidden_dim),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(hidden_dim, num_queries),
+                )
 
     def forward(self, x):
         B = x.size(0)
@@ -85,7 +86,7 @@ class BoQBlockWithMask(torch.nn.Module):
 
 
 class BoQ(torch.nn.Module):
-    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=True):
+    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False):
         super().__init__()
         self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
         self.norm_input = torch.nn.LayerNorm(proj_channels)
@@ -94,7 +95,7 @@ class BoQ(torch.nn.Module):
         in_dim = proj_channels
         if slot_mask:
             self.boqs = torch.nn.ModuleList([
-                BoQBlockWithMask(in_dim, num_queries, nheads=in_dim//64, mlp=mlp) for _ in range(num_layers)])
+                BoQBlockWithMask(in_dim, num_queries, nheads=in_dim//64, mlp=mlp, hidden_layer=hidden_layer) for _ in range(num_layers)])
         else:
             self.boqs = torch.nn.ModuleList([
                 BoQBlock(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])

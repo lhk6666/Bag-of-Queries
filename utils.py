@@ -221,6 +221,7 @@ def parse_args():
 
     parser.add_argument("--slotmask", type=str, help="Slot mask for the model.")
     parser.add_argument("--mlp", type=str, help="Use MLP for slot mask in BoQ.")
+    parser.add_argument("--hidden_layer", type=str, help="Use hidden layer in slot mask MLP.")
 
     return parser.parse_args()
 
@@ -268,5 +269,12 @@ def hyper_params_getter():
             hparams.mlp = False
         else:
             raise ValueError("mlp should be either 'true' or 'false'")
+    if args.hidden_layer:
+        if args.hidden_layer.lower() == "true":
+            hparams.hidden_layer = True
+        elif args.hidden_layer.lower() == "false":
+            hparams.hidden_layer = False
+        else:
+            raise ValueError("hidden_layer should be either 'true' or 'false'")
     
     return hparams
