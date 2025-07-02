@@ -52,3 +52,6 @@ class ModelName:
     
     def jetson(self):
         return "models/test.ckpt"
+    
+    def remake_slot_mask_mlp_b_boqlayer2_hiddenlayer(self):
+        return "logs/dinov2_vitb14/version_41/checkpoints/epoch[17]_R@1[0.9311]_R@5[0.9595].ckpt"

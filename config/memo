@@ -1,0 +1,1 @@
+--mlp true --hidden_layer true --backbone dinov2_vitb14 --epoch 40 /home/dragon_llm/daikin/daikin_ws/src/boq/logs/dinov2_vitb14/version_41/checkpoints/epoch[17]_R@1[0.9311]_R@5[0.9595].ckpt

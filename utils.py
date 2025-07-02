@@ -70,6 +70,7 @@ def load_model(hparams, ckpt_path: str, device: str = "cuda:0"):
         row_dim=hparams.output_dim//hparams.channel_proj,
         slot_mask=hparams.slot_mask,
         mlp=hparams.mlp,
+        hidden_layer=hparams.hidden_layer,
     )
     model = BoQModel.load_from_checkpoint(
         ckpt_path,
