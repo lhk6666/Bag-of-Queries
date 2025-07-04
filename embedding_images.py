@@ -36,11 +36,11 @@ def main(path):
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     model = load_model(hparams, ckpt, device)
-    embed_all_images_in_directory(model, path, name='nordland_winter', device=device, output_dir="embeddings/" + model_name)
-    # embed_all_images_in_directory(model, path, name='0066_3_3_1', device=device, output_dir="/home/dragon_llm/daikin/daikin_ws/src/boq/embeddings/" + model_name)
+    # embed_all_images_in_directory(model, path, name='nordland_winter', device=device, output_dir="embeddings/" + model_name)
+    embed_all_images_in_directory(model, path, name='0066_3_3_1', device=device, output_dir="/home/dragon_llm/daikin/daikin_ws/src/boq/embeddings/" + model_name)
 
 if __name__ == "__main__":
-    nordland_path = "image/Nordland/ref"
-    # oo66_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/0066_3_3_1/0066_3*3*1"
+    # nordland_path = "image/Nordland/ref"
+    oo66_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/0066_3_3_1/0066_3*3*1"
 
-    main(nordland_path)
+    main(oo66_path)

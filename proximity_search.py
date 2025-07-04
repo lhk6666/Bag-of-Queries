@@ -185,8 +185,8 @@ def main(ckpt, rank, model_name, use_onnx=False):
     query_folder = "image/Nordland/query"
     batch_evaluation(searcher, query_folder, rank)
 
-def single_image_demo(ckpt, model_name, image_path=None, image=None):
-    searcher = ProximitySearcher(ckpt, model_name)
+def single_image_demo(ckpt, model_name, image_path=None, image=None, use_onnx=False):
+    searcher = ProximitySearcher(ckpt, model_name, use_onnx=use_onnx)
     searcher.load_reference_embeddings(f"embeddings/{model_name}/0066_3_3_1.pt")
     searcher.build_index(nlist=20, m=4, nbits=8, nprobe=10, k=10)
     
@@ -212,7 +212,7 @@ if __name__ == "__main__":
         main(ckpt, rank=10, model_name=model_name, use_onnx=use_onnx)
     elif mode == "2":
         image_path = input("Enter image path: ")
-        indices, distance = single_image_demo(ckpt, model_name, image_path)
+        indices, distance = single_image_demo(ckpt, model_name, image_path, use_onnx=use_onnx)
         print(f"Indices: {indices}")
         print(f"Distances: {distance}")
     else:

@@ -2,3 +2,4 @@
 --mlp true --hidden_layer false --backbone dinov2_vitb14 --epoch 40 /home/dragon_llm/daikin/daikin_ws/src/boq/logs/dinov2_vitb14/version_43/checkpoints/epoch[36]_R@1[0.9297]_R@5[0.9608].ckpt
 --mlp true --hidden_layer true --backbone dinov2_vits14 --epoch 40 /home/dragon_llm/daikin/daikin_ws/src/boq/logs/dinov2_vits14/version_10/checkpoints/epoch[16]_R@1[0.9203]_R@5[0.9568].ckpt
 --mlp true --hidden_layer false --backbone dinov2_vits14 --epoch 40 /home/dragon_llm/daikin/daikin_ws/src/boq/logs/dinov2_vits14/version_11/checkpoints/epoch[37]_R@1[0.9176]_R@5[0.9568].ckpt
+--mlp true --hidden_layer true --backbone dinov2_vitl14 --epoch 40 /home/dragon_llm/daikin/daikin_ws/src/boq/logs/dinov2_vitl14/version_10/checkpoints/epoch[13]_R@1[0.9297]_R@5[0.9662].ckpt
