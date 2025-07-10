@@ -26,7 +26,17 @@ def embed_all_images_in_directory(model, directory_path, name, device="cuda:0", 
     output_path = os.path.join(output_dir, f"{name}.pt")
     torch.save(all_emb, output_path)
 
-def main(path):
+if __name__ == "__main__":
+    dataset_name = input("Choose dataset name: \n1. nordland_winter\n2. 0066_3_3_1\n")
+    if dataset_name == "nordland_winter" or dataset_name == "1":
+        path = "image/Nordland/ref"
+        name = "nordland_winter"
+    elif dataset_name == "0066_3_3_1" or dataset_name == "2": 
+        path = "image/0066_3_3_1/0066_3*3*1"
+        name = "0066_3_3_1"
+    else:
+        raise ValueError("Invalid dataset name. Please choose either 'nordland_winter' or '0066_3_3_1'.")
+
     hparams = hyper_params_getter()
     all_models = [name for name in dir(ModelName) if callable(getattr(ModelName, name)) and not name.startswith('__')]
     model_name = input("Please select one model below: " + "\n" + str(all_models) + "\n")
@@ -37,10 +47,4 @@ def main(path):
 
     model = load_model(hparams, ckpt, device)
     # embed_all_images_in_directory(model, path, name='nordland_winter', device=device, output_dir="embeddings/" + model_name)
-    embed_all_images_in_directory(model, path, name='0066_3_3_1', device=device, output_dir="/home/dragon_llm/daikin/daikin_ws/src/boq/embeddings/" + model_name)
-
-if __name__ == "__main__":
-    # nordland_path = "image/Nordland/ref"
-    oo66_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/image/0066_3_3_1/0066_3*3*1"
-
-    main(oo66_path)
+    embed_all_images_in_directory(model, path, name=name, device=device, output_dir="embeddings/" + model_name)
