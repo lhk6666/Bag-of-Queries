@@ -23,16 +23,32 @@ class IndexIVFPQ():
         self.index.nprobe = nprobe
         res = faiss.StandardGpuResources()
         self.index = faiss.index_cpu_to_gpu(res, 0, self.index)
+        self.ref_embs = None  # 存原始向量
 
     def train(self, ref_embs):
+        self.ref_embs = ref_embs.astype('float32')  # 保存原始特征，后续 rerank 用
         self.index.train(ref_embs)
 
     def add(self, ref_embs):
         self.index.add(ref_embs)
 
-    def search(self, query_embs, k):
+    def search(self, query_embs, k, rerank=False):
         distances, indices = self.index.search(query_embs, k)
+        if rerank and self.ref_embs is not None:
+            # 对每个query做rerank
+            reranked_indices = []
+            reranked_distances = []
+            for i in range(query_embs.shape[0]):
+                idx = indices[i]
+                vecs = self.ref_embs[idx]  # shape: [k, d]
+                q = query_embs[i].reshape(1, -1)
+                dists = np.linalg.norm(vecs - q, axis=1)
+                sort_idx = np.argsort(dists)
+                reranked_indices.append(idx[sort_idx])
+                reranked_distances.append(dists[sort_idx])
+            return np.array(reranked_distances), np.array(reranked_indices)
         return distances, indices
+
     
 def load_onnx_model(ckpt_path: str):
     onnx_model = onnx.load("models/test.onnx")

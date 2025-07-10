@@ -53,7 +53,7 @@ class ProximitySearcher:
         self.gt_mapping = gt_data[:, -1]
         print(f"Loaded ground truth mapping with {len(self.gt_mapping)} entries")
     
-    def search_single_image(self, image_path=None, image=None, top_k=10):
+    def search_single_image(self, image_path=None, image=None, top_k=10, rerank=False):
         if self.index is None:
             raise ValueError("Please build index first")
         
@@ -71,7 +71,7 @@ class ProximitySearcher:
                 emb = infer_single_image_edge(self.model, image)
         query_np = emb.detach().cpu().numpy().astype('float32') if not self.use_onnx else emb.astype('float32')
         
-        distances, indices = self.index.search(query_np, top_k)
+        distances, indices = self.index.search(query_np, top_k, rerank=rerank)
         
         end_time = time.time()
         search_time = end_time - start_time
