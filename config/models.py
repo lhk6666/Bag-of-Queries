@@ -47,11 +47,20 @@ class ModelName:
     def slot_mask_mlp_l_boqlayer2_hiddenlayer(self):
         return "logs/dinov2_vitl14/version_6/checkpoints/epoch[13]_R@1[0.9338]_R@5[0.9649].ckpt"
     
-    def test(self):
-        return "logs/dinov2_vitb14/version_43/checkpoints/epoch[36]_R@1[0.9297]_R@5[0.9608].ckpt"
+    # def test(self):
+    #     return "logs/dinov2_vitb14/version_43/checkpoints/epoch[36]_R@1[0.9297]_R@5[0.9608].ckpt"
     
     def jetson(self):
         return "models/test.ckpt"
     
     def remake_slot_mask_mlp_b_boqlayer2_hiddenlayer(self):
         return "logs/dinov2_vitb14/version_41/checkpoints/epoch[17]_R@1[0.9311]_R@5[0.9595].ckpt"
+    
+    def remake_slot_mask_mlp_b_boqlayer2_non_hiddenlayer(self):
+        return "logs/dinov2_vitb14/version_46/checkpoints/epoch[16]_R@1[0.9297]_R@5[0.9622].ckpt"
+    
+    def remake_origin_b(self):
+        return "logs/dinov2_vitb14/version_45/checkpoints/epoch[12]_R@1[0.9270]_R@5[0.9608].ckpt"
+    
+    def test(self):
+        return "logs/dinov2_vitb14/version_58/checkpoints/epoch[39]_R@1[0.9284]_R@5[0.9622].ckpt"
