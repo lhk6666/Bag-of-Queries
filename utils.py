@@ -23,10 +23,10 @@ class IndexIVFPQ():
         self.index.nprobe = nprobe
         res = faiss.StandardGpuResources()
         self.index = faiss.index_cpu_to_gpu(res, 0, self.index)
-        self.ref_embs = None  # 存原始向量
+        self.ref_embs = None 
 
     def train(self, ref_embs):
-        self.ref_embs = ref_embs.astype('float32')  # 保存原始特征，后续 rerank 用
+        self.ref_embs = ref_embs.astype('float32') 
         self.index.train(ref_embs)
 
     def add(self, ref_embs):
@@ -35,7 +35,6 @@ class IndexIVFPQ():
     def search(self, query_embs, k, rerank=False):
         distances, indices = self.index.search(query_embs, k)
         if rerank and self.ref_embs is not None:
-            # 对每个query做rerank
             reranked_indices = []
             reranked_distances = []
             for i in range(query_embs.shape[0]):
