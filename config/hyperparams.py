@@ -25,6 +25,7 @@ class HyperParams:
         self.val_sets: dict = {
             "msls-val":     "./data/val/msls-val",              # path to the msls-val dataset
             "pitts30k-val": "./data/val/pitts30k-val",          # path to the pitts30k-val dataset
+            "nordland": "./data/val/Nordland",                #
         }
         
         ## Training config:

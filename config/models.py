@@ -50,17 +50,45 @@ class ModelName:
     # def test(self):
     #     return "logs/dinov2_vitb14/version_43/checkpoints/epoch[36]_R@1[0.9297]_R@5[0.9608].ckpt"
     
+    # trial_200
     def jetson(self):
         return "models/test.ckpt"
     
-    def remake_slot_mask_mlp_b_boqlayer2_hiddenlayer(self):
-        return "logs/dinov2_vitb14/version_41/checkpoints/epoch[17]_R@1[0.9311]_R@5[0.9595].ckpt"
+    # trial_205
+    def remake_slot_mask_mlp_s_boqlayer2_non_hiddenlayer(self):
+        return "logs/dinov2_vits14/version_17/checkpoints/epoch[20]_R@1[0.9176]_R@5[0.9608].ckpt"
     
+    # trial_209
+    def remake_slot_mask_mlp_s_boqlayer2_hiddenlayer(self):
+        return "logs/dinov2_vits14/version_10/checkpoints/epoch[16]_R@1[0.9203]_R@5[0.9568].ckpt"
+    
+    # trial_208
+    def remake_slot_mask_mlp_b_boqlayer2_hiddenlayer(self):
+        return "logs/dinov2_vitb14/version_44/checkpoints/epoch[21]_R@1[0.9311]_R@5[0.9595].ckpt"
+    
+    # trial_210 & 198
     def remake_slot_mask_mlp_b_boqlayer2_non_hiddenlayer(self):
         return "logs/dinov2_vitb14/version_46/checkpoints/epoch[16]_R@1[0.9297]_R@5[0.9622].ckpt"
     
+    # trial_206 & 212
+    def remake_slot_mask_mlp_l_boqlayer2_non_hiddenlayer(self):
+        return "logs/dinov2_vitl14/version_13/checkpoints/epoch[14]_R@1[0.9270]_R@5[0.9662].ckpt"
+    
+    # trial_207 & 214
+    def remake_slot_mask_mlp_l_boqlayer2_hiddenlayer(self):
+        return "logs/dinov2_vitl14/version_29/checkpoints/epoch[16]_R@1[0.9297]_R@5[0.9676].ckpt"
+    
+    # trial_202
+    def remake_origin_s(self):
+        return "logs/dinov2_vits14/version_12/checkpoints/epoch[14]_R@1[0.9189]_R@5[0.9568].ckpt"
+    
+    # trial_211 & 201
     def remake_origin_b(self):
         return "logs/dinov2_vitb14/version_45/checkpoints/epoch[12]_R@1[0.9270]_R@5[0.9608].ckpt"
+    
+    # trial_203 & 213
+    def remake_origin_l(self):
+        return "logs/dinov2_vitl14/version_14/checkpoints/epoch[17]_R@1[0.9324]_R@5[0.9662].ckpt"
     
     def test(self):
         return "logs/dinov2_vitb14/version_58/checkpoints/epoch[39]_R@1[0.9284]_R@5[0.9622].ckpt"

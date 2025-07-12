@@ -6,6 +6,7 @@ import os
 import glob
 import numpy as np
 from config.models import ModelName
+import faiss
 
 class ProximitySearcher:
     def __init__(self, ckpt, model_name, device=None, use_onnx=False):
@@ -44,6 +45,11 @@ class ProximitySearcher:
         self.index.train(self.ref_embs_np)
         self.index.add(self.ref_embs_np)
         print(f"Index trained and added {N} reference embeddings with dimension {D}")
+
+    def build_index_validation(self):
+        self.index = faiss.IndexFlatL2(self.ref_embs_np.shape[1])
+        self.index.add(self.ref_embs_np)
+        print(f"Validation index built with {self.ref_embs_np.shape[0]} embeddings of dimension {self.ref_embs_np.shape[1]}")
     
     def load_ground_truth(self, gt_file=None):
         if gt_file is None:
@@ -71,7 +77,10 @@ class ProximitySearcher:
                 emb = infer_single_image_edge(self.model, image)
         query_np = emb.detach().cpu().numpy().astype('float32') if not self.use_onnx else emb.astype('float32')
         
-        distances, indices = self.index.search(query_np, top_k, rerank=rerank)
+        if rerank:
+            distances, indices = self.index.search(query_np, top_k, rerank=rerank)
+        else:
+            distances, indices = self.index.search(query_np, top_k)
         
         end_time = time.time()
         search_time = end_time - start_time
@@ -180,7 +189,7 @@ def result_saver(total_queries, avg_time, total_time, r1_score, r5_score, r10_sc
 def main(ckpt, rank, model_name, use_onnx=False):
     searcher = ProximitySearcher(ckpt, model_name, use_onnx=use_onnx)
     searcher.load_reference_embeddings()
-    searcher.build_index(k=rank)
+    searcher.build_index_validation()
     
     query_folder = "image/Nordland/query"
     batch_evaluation(searcher, query_folder, rank)

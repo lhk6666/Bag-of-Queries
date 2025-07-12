@@ -14,6 +14,7 @@ from torchvision.transforms import v2  as T
 from src.dataloaders import GSVCitiesDataset
 from src.dataloaders import PittsburghDataset
 from src.dataloaders import MapillarySLSDataset
+from src.dataloaders import NordlandDataset
 
 class VPRDataModule(L.LightningDataModule):
     def __init__(
@@ -21,7 +22,7 @@ class VPRDataModule(L.LightningDataModule):
         gsv_cities_path: str = None,
         cities: str | list = "all",
         img_per_place: int = 4,
-        val_sets: dict = {"msls-val": None, "pitts30k-val": None},
+        val_sets: dict = {"msls-val": None, "pitts30k-val": None, "nordland": None},
         train_img_size=(224, 224),
         val_img_size=(224, 224),
         batch_size: int = 100,
@@ -74,6 +75,12 @@ class VPRDataModule(L.LightningDataModule):
             if "pitts30k-val" in self.val_sets:
                 val_ds = PittsburghDataset(
                     dataset_path=self.val_sets["pitts30k-val"],
+                    transform=self.val_transform
+                )
+                self.val_datasets.append(val_ds)
+            if "nordland" in self.val_sets:
+                val_ds = NordlandDataset(
+                    dataset_path=self.val_sets["nordland"],
                     transform=self.val_transform
                 )
                 self.val_datasets.append(val_ds)

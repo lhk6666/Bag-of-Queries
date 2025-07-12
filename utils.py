@@ -239,6 +239,8 @@ def parse_args():
     parser.add_argument("--slotmask", type=str, help="Slot mask for the model.")
     parser.add_argument("--mlp", type=str, help="Use MLP for slot mask in BoQ.")
     parser.add_argument("--hidden_layer", type=str, help="Use hidden layer in slot mask MLP.")
+    parser.add_argument("--num_layers", type=int, help="Number of layers in the BoQ model.")
+    parser.add_argument("--num_queries", type=int, help="Number of queries in the BoQ model.")
 
     return parser.parse_args()
 
@@ -272,6 +274,10 @@ def hyper_params_getter():
         hparams.output_dim = args.dim
     if args.dev:
         hparams.dev_mode = args.dev
+    if args.num_layers:
+        hparams.num_layers = args.num_layers
+    if args.num_queries:
+        hparams.num_queries = args.num_queries
     if args.slotmask:
         if args.slotmask.lower() == "true":
             hparams.slot_mask = True
