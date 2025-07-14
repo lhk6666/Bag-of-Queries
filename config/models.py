@@ -72,7 +72,7 @@ class ModelName:
     
     # trial_206 & 212
     def remake_slot_mask_mlp_l_boqlayer2_non_hiddenlayer(self):
-        return "logs/dinov2_vitl14/version_13/checkpoints/epoch[14]_R@1[0.9270]_R@5[0.9662].ckpt"
+        return "logs/dinov2_vitl14/version_31/checkpoints/epoch[22]_R@1[0.9324]_R@5[0.9622].ckpt"
     
     # trial_207 & 214
     def remake_slot_mask_mlp_l_boqlayer2_hiddenlayer(self):
