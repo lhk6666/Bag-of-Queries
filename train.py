@@ -23,7 +23,7 @@ def train(hparams, dev_mode=False):
     
     # Instantiate the backbone and define the image size for training and validation
     if "dinov2" in hparams.backbone_name:
-        backbone = DinoV2(backbone_name=hparams.backbone_name, unfreeze_n_blocks=hparams.unfreeze_n_blocks)
+        backbone = DinoV2(backbone_name=hparams.backbone_name, unfreeze_n_blocks=hparams.unfreeze_n_blocks, output_layers=hparams.out_layers)
         train_img_size = (224, 224)
         val_img_size = (322, 322)
         hparams.backbone_name = backbone.backbone_name # in case the user passed dinov2 without the version
@@ -42,7 +42,7 @@ def train(hparams, dev_mode=False):
     
     # Instantiate BoQ aggregator
     aggregator = BoQ(
-        in_channels=backbone.out_channels,
+        in_channels=[backbone.out_channels for _ in range(len(backbone.output_layers))],
         proj_channels=hparams.channel_proj,
         num_queries=hparams.num_queries,
         num_layers=hparams.num_layers,

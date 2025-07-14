@@ -23,14 +23,15 @@ class DinoV2(torch.nn.Module):
         backbone_name="dinov2_vitb14",
         unfreeze_n_blocks=2,
         reshape_output=True,
+        output_layers=None, 
     ):
         super().__init__()
         
         self.backbone_name = backbone_name
         self.unfreeze_n_blocks = unfreeze_n_blocks
         self.reshape_output = reshape_output
-        
-        # make sure the backbone_name is in the available models
+        self.output_layers = output_layers if output_layers is not None else [-1]
+
         if self.backbone_name not in self.AVAILABLE_MODELS:
             print(f"Backbone {self.backbone_name} is not recognized!, using dinov2_vitb14")
             self.backbone_name = "dinov2_vitb14"                             
@@ -40,9 +41,7 @@ class DinoV2(torch.nn.Module):
         # freeze all parameters
         for param in self.dino.parameters():
             param.requires_grad = False
-        
-        # unfreeze the last few blocks
-        for block in self.dino.blocks[ -unfreeze_n_blocks : ]:
+        for block in self.dino.blocks[-unfreeze_n_blocks:]:
             for param in block.parameters():
                 param.requires_grad = True
         
@@ -54,25 +53,28 @@ class DinoV2(torch.nn.Module):
     
     def forward(self, x):
         B, _, H, W = x.shape
-        # No need to compute gradients for frozen layers
-        with torch.no_grad():
-            x = self.dino.prepare_tokens_with_masks(x)
-            for blk in self.dino.blocks[ : -self.unfreeze_n_blocks]:
-                x = blk(x)
+        features = []
+        x = self.dino.prepare_tokens_with_masks(x)
+        num_blocks = len(self.dino.blocks)
 
-        # Last blocks are trained
-        for blk in self.dino.blocks[-self.unfreeze_n_blocks : ]:
-            x = blk(x)
-            
+        with torch.no_grad():
+            for i, blk in enumerate(self.dino.blocks):
+                x = blk(x)
+                idx = i if i < num_blocks else i - num_blocks
+                if idx in self.output_layers or (i - num_blocks) in self.output_layers:
+                    features.append(x.clone())
         
-        x = x[:, 1:] # remove the [CLS] token
+        output_features = []
+        for f in features:
+            f = f[:, 1:]  # remove [CLS] token
+            if self.reshape_output:
+                _, _, C = f.shape
+                patch_size = self.patch_size
+                f = f.permute(0, 2, 1).view(B, C, H // patch_size, W // patch_size)
+            output_features.append(f)
         
-        # reshape the output tensor to B, C, H, W
-        if self.reshape_output:
-            _, _, C = x.shape # or C = self.embed_dim
-            patch_size = self.patch_size
-            x = x.permute(0, 2, 1).view(B, C, H // patch_size, W // patch_size)
-        return x
+        return output_features
+
     
     
 class ResNet(nn.Module):

@@ -86,40 +86,58 @@ class BoQBlockWithMask(torch.nn.Module):
 
 
 class BoQ(torch.nn.Module):
-    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False):
+    def __init__(self, 
+                 in_channels,        # list, e.g. [1024, 1024]
+                 proj_channels=512,
+                 num_queries=32,
+                 num_layers=2,  
+                 row_dim=32,
+                 slot_mask=True,
+                 mlp=False,
+                 hidden_layer=False):
         super().__init__()
-        self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
-        self.norm_input = torch.nn.LayerNorm(proj_channels)
-        
+        assert isinstance(in_channels, list), "in_channels must be a list, e.g. [1024, 1024]"
+        self.proj_cs = torch.nn.ModuleList([
+            torch.nn.Conv2d(in_ch, proj_channels, kernel_size=3, padding=1) for in_ch in in_channels
+        ])
+        self.norm_inputs = torch.nn.ModuleList([
+            torch.nn.LayerNorm(proj_channels) for _ in in_channels
+        ])
         self.slot_mask = slot_mask
-        in_dim = proj_channels
-        if slot_mask:
-            self.boqs = torch.nn.ModuleList([
-                BoQBlockWithMask(in_dim, num_queries, nheads=in_dim//64, mlp=mlp, hidden_layer=hidden_layer) for _ in range(num_layers)])
-        else:
-            self.boqs = torch.nn.ModuleList([
-                BoQBlock(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])
+
+        self.boq_blocks = torch.nn.ModuleList()
+        for _ in in_channels:
+            layer_blocks = torch.nn.ModuleList()
+            for _ in range(num_layers):
+                if slot_mask:
+                    layer_blocks.append(
+                        BoQBlockWithMask(proj_channels, num_queries, nheads=proj_channels//64, mlp=mlp, hidden_layer=hidden_layer)
+                    )
+                else:
+                    layer_blocks.append(
+                        BoQBlock(proj_channels, num_queries, nheads=proj_channels//64)
+                    )
+            self.boq_blocks.append(layer_blocks)
+ 
+        self.fc = torch.nn.Linear(len(in_channels)*num_queries, row_dim)
         
-        self.fc = torch.nn.Linear(num_layers*num_queries, row_dim)
-        
-    def forward(self, x):
-        # reduce input dimension using 3x3 conv when using ResNet
-        x = self.proj_c(x)
-        x = x.flatten(2).permute(0, 2, 1)
-        x = self.norm_input(x)
-        
-        outs = []
-        attns = []
-        for i in range(len(self.boqs)):
-            if self.slot_mask:
-                x, out, attn, _ = self.boqs[i](x)
-            else:
-                x, out, attn = self.boqs[i](x)
+    def forward(self, features_list):
+        outs, attns = [], []
+        for i, x in enumerate(features_list):
+            # x: [B, C, H, W]
+            x = self.proj_cs[i](x)
+            x = x.flatten(2).permute(0, 2, 1)
+            x = self.norm_inputs[i](x)
+     
+            for boq in self.boq_blocks[i]:
+                if self.slot_mask:
+                    x, out, attn, _ = boq(x)
+                else:
+                    x, out, attn = boq(x)
             outs.append(out)
             attns.append(attn)
-
-        out = torch.cat(outs, dim=1)
-        out = self.fc(out.permute(0, 2, 1))
+        out = torch.cat(outs, dim=1)                      # [B, num_input_layers*num_queries, in_dim]
+        out = self.fc(out.permute(0, 2, 1))               # [B, in_dim, row_dim]
         out = out.flatten(1)
         out = torch.nn.functional.normalize(out, p=2, dim=-1)
         return out, attns

@@ -39,6 +39,7 @@ class HyperParams:
         self.milestones: list = [10, 20]
         self.num_workers: int = 8
         self.precision: str = "16-mixed"      # "16-mixed" or "32" for training precision
+        self.out_layers: list = [-1]  # output layers from the backbone to use in BoQ
         
         ## misc
         self.silent: bool = False            # disable console output
