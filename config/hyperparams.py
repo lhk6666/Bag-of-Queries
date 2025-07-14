@@ -38,6 +38,7 @@ class HyperParams:
         self.lr_mul: float = 0.1
         self.milestones: list = [10, 20]
         self.num_workers: int = 8
+        self.precision: str = "16-mixed"      # "16-mixed" or "32" for training precision
         
         ## misc
         self.silent: bool = False            # disable console output
