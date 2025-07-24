@@ -12,6 +12,8 @@ from pytorch_metric_learning import losses, miners
 
 from src import utils
 
+from matplotlib import pyplot as plt
+
 class BoQModel(L.LightningModule):
     def __init__(
             self, 
@@ -70,8 +72,20 @@ class BoQModel(L.LightningModule):
     
     def forward(self, x):
         x = self.backbone(x)
-        x, attns = self.aggregator(x)
-        return x, attns
+        x, attns, queries, masks_std = self.aggregator(x)
+        return x, attns, queries, masks_std
+    
+    def query_diversity_loss(self, queries):
+        # queries: [B, Q, C]
+        B, Q, C = queries.shape
+        loss = 0.0
+        for b in range(B):
+            q = torch.nn.functional.normalize(queries[b], p=2, dim=1)  # [Q, C]
+            gram = torch.matmul(q, q.t())  # [Q, Q]
+            I = torch.eye(Q, device=gram.device, dtype=gram.dtype)
+            loss += ((gram - I) ** 2).mean()
+        return loss / B
+
     
     def training_step(self, batch, batch_idx):
         images, labels = batch
@@ -81,16 +95,30 @@ class BoQModel(L.LightningModule):
         labels = labels.flatten() # P*K
         
         # forward pass
-        descriptors, attentions = self(images)
+        descriptors, attentions, queries, masks_std = self(images)
+        queries = torch.cat(queries, dim=1)
         # compute loss
         loss = self.compute_loss(descriptors, labels)
+        diversity = self.query_diversity_loss(queries)
+        masks_std_loss = (masks_std - 0.3)**2
+        total_loss = loss +  diversity + masks_std_loss
+        self.log("masks_std", masks_std, prog_bar=True, logger=True)
         self.log("loss", loss, prog_bar=True, logger=True)
-        return loss 
+        self.log("diversity_loss", diversity, prog_bar=True, logger=True)
+        self.log("total_loss", total_loss, prog_bar=True, logger=True)
+        return loss
 
     def on_train_epoch_end(self):
         # reload the dataframes to shuffle in-city
         # this is faster than reloading the entire dataloader
         self.trainer.train_dataloader.dataset._refresh_dataframes()
+        # for i, mask in enumerate(self.aggregator.masks):
+        #     mask = mask.detach().cpu().numpy()
+        #     plt.imshow(mask, cmap='gray')
+        #     plt.title(f"Slot Mask {i}")
+        #     plt.colorbar()
+        #     plt.savefig(f"slot_mask_epoch{self.current_epoch}_mask{i}.png")
+        #     plt.close()
         
     def on_validation_epoch_start(self):
         # we init an empty dictionary to store the descriptors for each dataloader
@@ -98,7 +126,7 @@ class BoQModel(L.LightningModule):
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         images, _ = batch
-        descriptors, attentions = self(images)
+        descriptors, attentions, _, _ = self(images)
         descriptors = descriptors.detach().cpu()#.numpy()
         
         if dataloader_idx not in self.validation_outputs:

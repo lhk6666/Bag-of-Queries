@@ -50,6 +50,7 @@ def train(hparams, dev_mode=False):
         slot_mask=hparams.slot_mask,
         mlp=hparams.mlp,
         hidden_layer=hparams.hidden_layer,
+        gnn_pooling=hparams.gnn_pooling,
     )
     
     # Define the entire Lightning model for training and validation
@@ -101,8 +102,8 @@ def train(hparams, dev_mode=False):
     
     # Define the checkpointing callback
     checkpointing = callbacks.ModelCheckpoint(
-        monitor="msls-val/R@1",  # <==== monitor the Recall@1 on the msls-val dataset
-        filename="epoch[{epoch:02d}]_R@1[{msls-val/R@1:.4f}]_R@5[{msls-val/R@5:.4f}]",
+        monitor="Nordland/R@1",  # <==== monitor the Recall@1 on the msls-val dataset
+        filename="epoch[{epoch:02d}]_R@1[{Nordland/R@1:.4f}]_R@5[{Nordland/R@5:.4f}]_R@10[{Nordland/R@10:.4f}]_msls-val[{msls-val/R@1:.4f}]_pitts30k-val[{pitts30k-val/R@1:.4f}]",
         auto_insert_metric_name=False,
         save_weights_only=False,
         save_top_k=3,

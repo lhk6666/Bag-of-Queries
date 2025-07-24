@@ -240,6 +240,7 @@ def parse_args():
     parser.add_argument("--hidden_layer", type=str, help="Use hidden layer in slot mask MLP.")
     parser.add_argument("--num_layers", type=int, help="Number of layers in the BoQ model.")
     parser.add_argument("--num_queries", type=int, help="Number of queries in the BoQ model.")
+    parser.add_argument("--gnn_pooling", type=str, help="Use GNN pooling in BoQ.")
 
     return parser.parse_args()
 
@@ -298,5 +299,12 @@ def hyper_params_getter():
             hparams.hidden_layer = False
         else:
             raise ValueError("hidden_layer should be either 'true' or 'false'")
+    if args.gnn_pooling:
+        if args.gnn_pooling.lower() == "true":
+            hparams.gnn_pooling = True
+        elif args.gnn_pooling.lower() == "false":
+            hparams.gnn_pooling = False
+        else:
+            raise ValueError("gnn_pooling should be either 'true' or 'false'")
     
     return hparams
