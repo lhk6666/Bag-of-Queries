@@ -196,7 +196,7 @@ def main(ckpt, rank, model_name, use_onnx=False):
 
 def single_image_demo(ckpt, model_name, image_path=None, image=None, use_onnx=False):
     searcher = ProximitySearcher(ckpt, model_name, use_onnx=use_onnx)
-    searcher.load_reference_embeddings(f"embeddings/{model_name}/0066_3_3_1.pt")
+    searcher.load_reference_embeddings(f"embeddings/{model_name}/daikin_factory.pt")
     searcher.build_index(nlist=20, m=4, nbits=8, nprobe=10, k=10)
     
     if image is not None:
