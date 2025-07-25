@@ -34,6 +34,9 @@ if __name__ == "__main__":
     elif dataset_name == "0066_3_3_1" or dataset_name == "2": 
         path = "image/0066_3_3_1/0066_3*3*1"
         name = "0066_3_3_1"
+    elif dataset_name == "daikin_factory" or dataset_name == "3":
+        path = "/media/dragon_llm/3C09549315E08290/pointcloud/images"
+        name = "daikin_factory"
     else:
         raise ValueError("Invalid dataset name. Please choose either 'nordland_winter' or '0066_3_3_1'.")
 
