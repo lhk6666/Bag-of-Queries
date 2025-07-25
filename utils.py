@@ -50,7 +50,7 @@ class IndexIVFPQ():
 
     
 def load_onnx_model(ckpt_path: str):
-    onnx_model = onnx.load("models/test.onnx")
+    onnx_model = onnx.load(ckpt_path)
     onnx.checker.check_model(onnx_model)
     sess = ort.InferenceSession(ckpt_path, providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 
