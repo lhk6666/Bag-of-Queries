@@ -13,6 +13,7 @@ class HyperParams:
         self.mlp: bool = False  # use MLP for slot mask in BoQ
         self.hidden_layer: bool = False  # use hidden layer in slot mask MLP
         self.gnn_pooling: bool = False  # use GNN pooling in BoQ
+        self.global_slot_mask: bool = False  # use global slot mask in BoQ
         
         ## Datasets:
         # NOTE: if you already have OpenVPRLab, you can set the path to the datasets from there

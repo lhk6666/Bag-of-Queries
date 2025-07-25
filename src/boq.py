@@ -179,10 +179,26 @@ class BoQBlockWithMask(torch.nn.Module):
 
 
 class BoQ(torch.nn.Module):
-    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False, gnn_pooling=False):
+    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False, gnn_pooling=False, global_slot_mask=False):
         super().__init__()
         self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
         self.norm_input = torch.nn.LayerNorm(proj_channels)
+
+        self.global_slot_mask = global_slot_mask
+        if global_slot_mask:
+            hidden_dim = proj_channels * 4
+            self.global_slot_mask_layer = torch.nn.Sequential(
+                        torch.nn.Linear(proj_channels, hidden_dim),
+                        torch.nn.ReLU(),
+                        # torch.nn.Sigmoid(),
+                        RowNormalize(),
+                        torch.nn.Dropout(0.3),
+                        torch.nn.Linear(hidden_dim, num_queries * num_layers),
+                        torch.nn.ReLU(),
+                        # torch.nn.Sigmoid(),
+                        RowNormalize(),
+                        # torch.nn.Dropout(0.25),
+                    )
         
         self.slot_mask = slot_mask
         self.gnn_pooling = gnn_pooling
@@ -205,6 +221,11 @@ class BoQ(torch.nn.Module):
         x = x.flatten(2).permute(0, 2, 1)
         x = self.norm_input(x)
         
+        if self.global_slot_mask:
+            global_feat = x.mean(dim=1)  # [B, in_dim]
+            global_mask = self.global_slot_mask_layer(global_feat)  # [B, num_queries * num_layers]
+            global_mask = global_mask[:, :, None]  # [B, num_queries * num_layers, 1]
+
         outs = []
         attns = []
         qs = []
@@ -222,7 +243,12 @@ class BoQ(torch.nn.Module):
             qs.append(q)
         
         masks_std = torch.stack(masks_std, dim=0).mean(dim=0) if self.slot_mask else 0
-        out = torch.cat(outs, dim=1)
+        masks_std = global_mask.std(dim=1).mean(dim=0) if self.global_slot_mask else masks_std
+
+        out = torch.cat(outs, dim=1) # [B, num_layers * num_queries, in_dim]
+        if self.global_slot_mask:
+            out = out * global_mask # [B, num_layers * num_queries, in_dim]
+
         if not self.gnn_pooling:
             out = self.fc(out.permute(0, 2, 1))
             out = out.flatten(1)

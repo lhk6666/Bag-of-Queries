@@ -241,6 +241,7 @@ def parse_args():
     parser.add_argument("--num_layers", type=int, help="Number of layers in the BoQ model.")
     parser.add_argument("--num_queries", type=int, help="Number of queries in the BoQ model.")
     parser.add_argument("--gnn_pooling", type=str, help="Use GNN pooling in BoQ.")
+    parser.add_argument("--global_slot_mask", type=str, help="Use global slot mask in BoQ.")
 
     return parser.parse_args()
 
@@ -306,5 +307,11 @@ def hyper_params_getter():
             hparams.gnn_pooling = False
         else:
             raise ValueError("gnn_pooling should be either 'true' or 'false'")
-    
+    if args.global_slot_mask:
+        if args.global_slot_mask.lower() == "true":
+            hparams.global_slot_mask = True
+        elif args.global_slot_mask.lower() == "false":
+            hparams.global_slot_mask = False
+        else:
+            raise ValueError("global_slot_mask should be either 'true' or 'false'")    
     return hparams

@@ -51,6 +51,7 @@ def train(hparams, dev_mode=False):
         mlp=hparams.mlp,
         hidden_layer=hparams.hidden_layer,
         gnn_pooling=hparams.gnn_pooling,
+        global_slot_mask=hparams.global_slot_mask,
     )
     
     # Define the entire Lightning model for training and validation
