@@ -140,12 +140,12 @@ class BoQBlockWithMask(torch.nn.Module):
                     torch.nn.ReLU(),
                     torch.nn.Sigmoid(),
                     RowNormalize(),
-                    torch.nn.Dropout(0.25),
+                    torch.nn.Dropout(0.4),
                     torch.nn.Linear(hidden_dim, num_queries),
                     torch.nn.ReLU(),
                     torch.nn.Sigmoid(),
                     RowNormalize(),
-                    torch.nn.Dropout(0.25),
+                    torch.nn.Dropout(0.4),
                 )
 
     def forward(self, x):
