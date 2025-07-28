@@ -10,36 +10,73 @@ import torch
 from torch_geometric.nn import GCNConv
 
 class BoQBlock(torch.nn.Module):
-    def __init__(self, in_dim, num_queries, nheads=8):
-        super(BoQBlock, self).__init__()
-        
+    def __init__(self, in_dim, num_queries, nheads=8, num_anchored=0):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_queries = num_queries
+        self.num_anchored = num_anchored
+
         self.encoder = torch.nn.TransformerEncoderLayer(d_model=in_dim, nhead=nheads, dim_feedforward=4*in_dim, batch_first=True, dropout=0.)
-        self.queries = torch.nn.Parameter(torch.randn(1, num_queries, in_dim))
         
-        # the following two lines are used during training only, you can cache their output in eval.
+        self.queries = torch.nn.Parameter(torch.randn(1, num_queries, in_dim))
+        # self.queries_mlp = torch.nn.Linear(in_dim, in_dim*num_queries)
+
+        self.dropout = torch.nn.Dropout(0.3)
+
+        self.query_pos = torch.zeros(1, num_queries, in_dim)
+        if num_anchored > 0:
+            grid_size = int(num_anchored**0.5)
+            coords = torch.stack(torch.meshgrid(
+                torch.linspace(0, 1, grid_size),
+                torch.linspace(0, 1, grid_size)
+            ), -1).reshape(-1, 2)[:num_anchored]
+            pos_embed = self.build_sincos_position_embedding(coords, in_dim)
+            actual_anchored = min(coords.shape[0], num_anchored)
+            self.query_pos[0, :actual_anchored, :] = pos_embed[:actual_anchored]
+
         self.self_attn = torch.nn.MultiheadAttention(in_dim, num_heads=nheads, batch_first=True)
         self.norm_q = torch.nn.LayerNorm(in_dim)
-        #####
-        
         self.cross_attn = torch.nn.MultiheadAttention(in_dim, num_heads=nheads, batch_first=True)
         self.norm_out = torch.nn.LayerNorm(in_dim)
-        
+
+    @staticmethod
+    def build_sincos_position_embedding(coords, dim):
+        import math
+        num = coords.shape[0]
+        pe = torch.zeros(num, dim)
+        div_term = torch.exp(torch.arange(0, dim // 2, 2).float() * -(math.log(10000.0) / (dim // 2)))
+        for i, (x, y) in enumerate(coords):
+            pe[i, 0::4] = torch.sin(x * div_term)
+            pe[i, 1::4] = torch.cos(x * div_term)
+            pe[i, 2::4] = torch.sin(y * div_term)
+            pe[i, 3::4] = torch.cos(y * div_term)
+        return pe
 
     def forward(self, x):
         B = x.size(0)
         x = self.encoder(x)
-        
+
+        # global_feat = x.mean(dim=1)  # [B, in_dim]
+        # q = self.queries_mlp(global_feat).view(B, self.num_queries, self.in_dim)  # [B, num_queries, in_dim]
+
         q = self.queries.repeat(B, 1, 1)
-        
-        # the following two lines are used during training.
-        # for stability purposes 
+
+        pos = self.query_pos.repeat(B, 1, 1).to(q.device)
+        q = q + pos 
         q = q + self.self_attn(q, q, q)[0]
         q = self.norm_q(q)
-        #######
-        
-        out, attn = self.cross_attn(q, x, x)        
+        # q = self.dropout(q)
+
+        # out, attn = self.cross_attn(q, x, x)
+        q1, attn = self.cross_attn(q, x, x)
+        q2 = q1 + q
+        q2 = self.norm_q(q2)
+        out, _ = self.cross_attn(q2, x, x)
+
+
         out = self.norm_out(out)
         return x, out, attn.detach(), q
+
     
 def grouped_mean_pooling(x, group_num):
     # x: [B, N, C]
