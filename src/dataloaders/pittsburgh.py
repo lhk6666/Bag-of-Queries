@@ -14,43 +14,24 @@ import torchvision
 from torch.utils.data import Dataset
 from PIL import Image
 
-
-# NOTE: for pitts30k-test and pitts250k-test 
-# you need to download them from  the author's website
-# https://www.di.ens.fr/willow/research/netvlad/
-# 
-# For faster loading I hardcoded the image names and ground truth for pitts30k-val (already comes with OpenVPRLab)
-
 REQUIRED_FILES = {
-    "pitts30k-val":     ["pitts30k_val_dbImages.npy", "pitts30k_val_qImages.npy", "pitts30k_val_gt_25m.npy"],
+    "pitts30k-test":     ["pitts30k_test_dbImages.npy", "pitts30k_test_qImages.npy", "pitts30k_test_gt_25m.npy"],
+    "pitts250k-test":    ["pitts250k_test_dbImages.npy", "pitts250k_test_qImages.npy", "pitts250k_test_gt_25m.npy"],
 }
 
 class PittsburghDataset(Dataset):
-    """
-    Args:
-        dataset_path (str): Directory containing the dataset. If None, the path `data/val/pitts30k-val` will be used.
-        input_transform (callable, optional): Optional transform to be applied on each image.
-    
-    Reference:
-        @inproceedings{torii2013visual,
-            title={Visual place recognition with repetitive structures},
-            author={Torii, Akihiko and Sivic, Josef and Pajdla, Tomas and Okutomi, Masatoshi},
-            booktitle={Proceedings of the IEEE conference on computer vision and pattern recognition},
-            pages={883--890},
-            year={2013}
-        }
-    """
 
     def __init__(
         self,
         dataset_path: Optional [str] = None,
         transform: Optional[Callable] = None,
+        _30k: bool = False,
+        _250k: bool = False,
     ):
         
         self.transform = transform
-        dataset_path = self._validate_path(dataset_path)
+        dataset_path = self._validate_path(dataset_path, _30k, _250k)
         self.dataset_path = dataset_path
-        self.dataset_name = dataset_path.name
         
         # load image names and ground truth data
         self.dbImages = np.load(dataset_path / REQUIRED_FILES[self.dataset_name][0])
@@ -80,19 +61,24 @@ class PittsburghDataset(Dataset):
     def __len__(self) -> int:
         return len(self.image_paths)
     
-    def _validate_path(self, dataset_path):
-        
+    def _validate_path(self, dataset_path, _30k, _250k):
         if dataset_path is None:
-            dataset_path = Path(__file__).parent.parent.parent / "data" / "val" / "msls-val"
-        
+            dataset_path = Path(__file__).parent.parent.parent / "data" / "val" / "pitts"
         path = Path(dataset_path)
+
+        if _30k:
+            self.dataset_name = "pitts30k-test"
+        elif _250k:
+            self.dataset_name = "pitts250k-test"
+        else:
+            raise ValueError("Either _30k or _250k must be True.")
 
         msg = "Make sure you downloaded the dataset with the provided script."
         if not path.is_dir():
             raise FileNotFoundError(f"The directory {dataset_path} does not exist. {msg}")
         
-        # make sure required metadata files are in the directory        
-        if not all((path / file).is_file() for file in REQUIRED_FILES[path.name]):
-            raise FileNotFoundError(f"Please make sure all requiered metadata for {dataset_path} are in the directory. i.e. {REQUIRED_FILES[self.dataset_name]}")
+        if not all((path / file).is_file() for file in REQUIRED_FILES[self.dataset_name]):
+            raise FileNotFoundError(f"Missing metadata in {path}. Expected files: {REQUIRED_FILES[self.dataset_name]}")
         
         return path
+

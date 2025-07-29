@@ -22,7 +22,7 @@ class VPRDataModule(L.LightningDataModule):
         gsv_cities_path: str = None,
         cities: str | list = "all",
         img_per_place: int = 4,
-        val_sets: dict = {"msls-val": None, "pitts30k-val": None, "nordland": None},
+        val_sets: dict = {"msls-val": None, "pitts30k-test": None, "pitts250k-test": None, "nordland": None},
         train_img_size=(224, 224),
         val_img_size=(224, 224),
         batch_size: int = 100,
@@ -72,10 +72,18 @@ class VPRDataModule(L.LightningDataModule):
                     transform=self.val_transform
                 )
                 self.val_datasets.append(val_ds)
-            if "pitts30k-val" in self.val_sets:
+            if "pitts30k-test" in self.val_sets:
                 val_ds = PittsburghDataset(
-                    dataset_path=self.val_sets["pitts30k-val"],
-                    transform=self.val_transform
+                    dataset_path=self.val_sets["pitts30k-test"],
+                    transform=self.val_transform,
+                    _30k = True
+                )
+                self.val_datasets.append(val_ds)
+            if "pitts250k-test" in self.val_sets:
+                val_ds = PittsburghDataset(
+                    dataset_path=self.val_sets["pitts250k-test"],
+                    transform=self.val_transform,
+                    _250k = True
                 )
                 self.val_datasets.append(val_ds)
             if "nordland" in self.val_sets:

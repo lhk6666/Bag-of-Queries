@@ -71,8 +71,8 @@ class BoQModel(L.LightningModule):
         return loss
     
     def forward(self, x):
-        x = self.backbone(x)
-        x, attns, queries, masks_std = self.aggregator(x)
+        x, cls = self.backbone(x)
+        x, attns, queries, masks_std = self.aggregator(x, cls)
         return x, attns, queries, masks_std
     
     def query_diversity_loss(self, queries):

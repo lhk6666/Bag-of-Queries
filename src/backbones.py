@@ -64,15 +64,15 @@ class DinoV2(torch.nn.Module):
         for blk in self.dino.blocks[-self.unfreeze_n_blocks : ]:
             x = blk(x)
             
-        
         x = x[:, 1:] # remove the [CLS] token
+        cls = x[:, 0]  # [B, C]
         
         # reshape the output tensor to B, C, H, W
         if self.reshape_output:
             _, _, C = x.shape # or C = self.embed_dim
             patch_size = self.patch_size
             x = x.permute(0, 2, 1).view(B, C, H // patch_size, W // patch_size)
-        return x
+        return x, cls  # return the features and the [CLS] token
     
     
 class ResNet(nn.Module):
