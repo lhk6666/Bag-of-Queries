@@ -22,19 +22,27 @@ class ProximitySearcher:
         self.ref_embs_np = None
         self.gt_mapping = None
         
-    def load_reference_embeddings(self, embedding_path=None):
+    def load_reference_embeddings(self, embedding_path=None, posi_embed_flag=False):
+        pose_np = None
         if embedding_path is None:
             embedding_path = f"embeddings/{self.model_name}/nordland_winter.pt"
         
         ref_embs = torch.load(embedding_path, weights_only=True)
-        self.ref_embs_np = ref_embs.detach().cpu().numpy().astype('float32')
+        if posi_embed_flag:
+            ref_embs_ = ref_embs[:, :, :-6]  # Exclude positional embeddings if posi_embed_flag is True
+            pose_ts = ref_embs[:, :, -6:]  # Extract positional embeddings if posi_embed_flag is True
+            pose_np = pose_ts.detach().cpu().numpy().astype('float32')
+            pose_np = pose_np.reshape(pose_np.shape[0], pose_np.shape[2])  # Reshape to 2D array
+        else:
+            ref_embs_ = ref_embs
+        self.ref_embs_np = ref_embs_.detach().cpu().numpy().astype('float32')
         
         if self.ref_embs_np.ndim == 3 and self.ref_embs_np.shape[1] == 1:
             self.ref_embs_np = self.ref_embs_np.reshape(self.ref_embs_np.shape[0], self.ref_embs_np.shape[2])
         
         N, D = self.ref_embs_np.shape
         print(f"Loaded reference embeddings with shape: {self.ref_embs_np.shape}")
-        return N, D
+        return pose_np
     
     def build_index(self, nlist=700, m=16, nbits=8, nprobe=100, k=10):
         if self.ref_embs_np is None:
