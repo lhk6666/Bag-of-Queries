@@ -7,7 +7,6 @@
 # ----------------------------------------------------------------------------
 
 import torch
-from torch_geometric.nn import GCNConv
 
 class BoQBlock(torch.nn.Module):
     def __init__(self, in_dim, num_queries, nheads=8, num_anchored=0):
@@ -65,80 +64,24 @@ class BoQBlock(torch.nn.Module):
         out = self.norm_out(out)
         return x, out, attn.detach(), q
 
-    
-def grouped_mean_pooling(x, group_num):
-    # x: [B, N, C]
-    B, N, C = x.shape
-    group_size = N // group_num
-    pooled = []
-    for g in range(group_num):
-        start = g * group_size
-        end = (g + 1) * group_size if g < group_num - 1 else N
-        pooled.append(x[:, start:end, :].mean(dim=1))  # [B, C]
-    pooled_feat = torch.cat(pooled, dim=-1)  # [B, group_num * C]
-    return pooled_feat     
-
 class RowNormalize(torch.nn.Module):
+    def __init__(self, dim=1):
+        super().__init__()
+        self.dim = dim
+
     def forward(self, x):
         # x: (batch, n)
-        return x * (x.shape[1] / x.sum(dim=1, keepdim=True)) 
-    
-class SlotMaskAttention(torch.nn.Module):
-    def __init__(self, in_dim, num_queries, nheads=4, attn_dim=None):
-        super().__init__()
-        self.num_queries = num_queries
-        attn_dim = attn_dim or in_dim
-        self.slot_embed = torch.nn.Parameter(torch.randn(1, num_queries, attn_dim))
-        self.encoder = torch.nn.TransformerEncoderLayer(d_model=in_dim, nhead=nheads, dim_feedforward=4*in_dim, batch_first=True, dropout=0.2)
-        self.attn = torch.nn.MultiheadAttention(attn_dim, nheads, batch_first=True)
-        self.score_proj = torch.nn.Linear(attn_dim, 1)
-        self.norm = torch.nn.LayerNorm(attn_dim)
-
-    def forward(self, global_feat):
-        # global_feat: [B, in_dim]
-        x = self.encoder(global_feat)
-        B = global_feat.shape[0]
-        slot_embed = self.slot_embed.repeat(B, 1, 1)   # [B, num_queries, attn_dim]
-        
-        # k = self.k_proj(global_feat).unsqueeze(1)      # [B, 1, attn_dim]
-        # v = self.v_proj(global_feat).unsqueeze(1)      # [B, 1, attn_dim]
-
-        attn_output, _ = self.attn(slot_embed, x, x)   
-        attn_output = self.norm(attn_output) 
-        # print(attn_output[0])
-        mask_scores = self.score_proj(attn_output).squeeze(-1)  # [B, num_queries]
-        # print(mask_scores)
-        mask = torch.sigmoid(mask_scores)  # or softmax
-        return mask
-    
-class GNNPoolingHead(torch.nn.Module):
-    def __init__(self, in_dim, out_dim, num_layers=2):
-        super().__init__()
-        self.gnns = torch.nn.ModuleList([GCNConv(in_dim, in_dim) for _ in range(num_layers)])
-        self.fc = torch.nn.Linear(in_dim, out_dim)
-    def forward(self, slots):  # slots: [B, N, D]
-        batch_out = []
-        for s in slots:
-            N = s.size(0)
-            edge_index = torch.combinations(torch.arange(N, device=s.device), r=2).t()
-            edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=1)
-            x = s
-            for gcn in self.gnns:
-                x = torch.relu(gcn(x, edge_index))
-                x = torch.nn.functional.normalize(x, p=2, dim=-1)
-            pooled = x.mean(dim=0)   # [D]
-            batch_out.append(self.fc(pooled))
-        return torch.stack(batch_out, dim=0)
+        return x * (x.shape[1] / x.sum(dim=self.dim, keepdim=True))
     
 class BoQBlockWithMask(torch.nn.Module):
     def __init__(self, in_dim, num_queries, nheads=8, mlp=True, hidden_layer=False, in_channels=768):
         super().__init__()
         # self.encoder = torch.nn.TransformerEncoderLayer(d_model=in_dim, nhead=nheads, dim_feedforward=4*in_dim, batch_first=True, dropout=0.)
-        self.queries = torch.nn.Parameter(torch.randn(1, num_queries, in_dim))
-        self.self_attn = torch.nn.MultiheadAttention(in_dim, num_heads=nheads, batch_first=True)
-        self.norm_q = torch.nn.LayerNorm(in_dim)
-        self.cross_attn = torch.nn.MultiheadAttention(in_dim, num_heads=nheads, batch_first=True)
-        self.norm_out = torch.nn.LayerNorm(in_dim)
+        self.queries = torch.nn.Parameter(torch.randn(1, num_queries, in_channels))
+        self.self_attn = torch.nn.MultiheadAttention(in_channels, num_heads=nheads, batch_first=True)
+        self.norm_q = torch.nn.LayerNorm(in_channels)
+        self.cross_attn = torch.nn.MultiheadAttention(in_channels, num_heads=nheads, batch_first=True)
+        self.norm_out = torch.nn.LayerNorm(in_channels)
 
         # self.slot_mask_attention = torch.nn.Sequential(
         #     SlotMaskAttention(in_dim, num_queries, nheads=nheads),
@@ -146,30 +89,42 @@ class BoQBlockWithMask(torch.nn.Module):
         # )
 
         self.mlp = mlp
+        self.num_queries = num_queries
         if not mlp:
             self.slot_mask = torch.nn.Parameter(torch.ones(num_queries)) 
         else:
             if not hidden_layer:
                 self.slot_mask = torch.nn.Sequential(
-                    torch.nn.Linear(in_channels, num_queries),
-                    torch.nn.ReLU(),
+                    torch.nn.Linear(in_channels * 3, 1),
+                    # torch.nn.ReLU(),
                     torch.nn.Sigmoid(),
-                    RowNormalize(),
-                    torch.nn.Dropout(0.35),
+                    # torch.nn.Softmax(dim=1),
+                    # RowNormalize(),
+                    torch.nn.Dropout(0.1),
                 )
             else:
-                hidden_dim = in_channels * 4
+                # hidden_dim = in_channels * 4
+                # self.slot_mask = torch.nn.Sequential(
+                #     torch.nn.Linear(in_channels, hidden_dim),
+                #     torch.nn.ReLU(),
+                #     torch.nn.Sigmoid(),
+                #     RowNormalize(),
+                #     torch.nn.Dropout(0.2),
+                #     torch.nn.Linear(hidden_dim, num_queries),
+                #     torch.nn.ReLU(),
+                #     torch.nn.Sigmoid(),
+                #     RowNormalize(),
+                #     torch.nn.Dropout(0.2),
+                # )
                 self.slot_mask = torch.nn.Sequential(
-                    torch.nn.Linear(in_channels, hidden_dim),
+                    torch.nn.Linear(in_channels * 3, in_channels * 4),
                     torch.nn.ReLU(),
-                    torch.nn.Sigmoid(),
-                    RowNormalize(),
-                    torch.nn.Dropout(0.2),
-                    torch.nn.Linear(hidden_dim, num_queries),
+                    torch.nn.Softmax(dim=1),
+                    torch.nn.Dropout(0.3),
+                    torch.nn.Linear(in_channels * 4, 1),
                     torch.nn.ReLU(),
-                    torch.nn.Sigmoid(),
-                    RowNormalize(),
-                    torch.nn.Dropout(0.2),
+                    # RowNormalize(),
+                    torch.nn.Softmax(dim=1),
                 )
 
     def forward(self, x, cls=None):
@@ -178,20 +133,28 @@ class BoQBlockWithMask(torch.nn.Module):
         q = self.queries.repeat(B, 1, 1)
         q = q + self.self_attn(q, q, q)[0]
         q = self.norm_q(q)
+
+        # cls = cls[:, None, :]
+        # q_cls = torch.cat([cls, q], dim=1)  # [B, num_queries + 1, in_dim]
+        # global_q_cls = q_cls.mean(dim=1)  # [B, in_dim]
+
+        global_x = x.mean(dim=1)  # [B, in_dim]
+        global_x = global_x[:, None, :]  # [B, 1, in_dim]
+        global_x = global_x.repeat(1, self.num_queries, 1)  # [B, num_queries, in_dim]
+        cls = cls[:, None, :]
+        cls = cls.repeat(1, self.num_queries, 1)  # [B, num_queries, in_dim]
+        q_cls = torch.cat([cls, q, global_x], dim=-1)  # [B, num_queries, in_dim * 3]
+
         out, attn = self.cross_attn(q, x, x)
         out = self.norm_out(out)
 
         if not self.mlp:
             mask = torch.sigmoid(self.slot_mask)[None, :, None]  # [1, num_queries, 1]
         else:
-            # global_feat = x.mean(dim=1)
-            # print(x.shape)
-            # global_feat, _ = self.pool(x)  # [B, in_dim]
-            # global_feat = grouped_mean_pooling(x, self.queries.shape[1]) 
-            # print(global_feat.shape)
-            mask = self.slot_mask(cls)  # [B, num_queries]  
-            # mask = self.slot_mask_attention(x)  # [B, num_queries]
-            mask = mask[:, :, None]  # [B, num_queries, 1]
+            # mask = self.slot_mask(global_q_cls)  # [B, num_queries]  
+
+            mask = self.slot_mask(q_cls)  # [B, num_queries, 1]
+
         # mask = mask * (mask.shape[1] / mask.sum(dim=1, keepdim=True)) 
         # mask = self.dropout(mask)
         # print(mask)
@@ -204,50 +167,26 @@ class BoQBlockWithMask(torch.nn.Module):
 class BoQ(torch.nn.Module):
     def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False, gnn_pooling=False, global_slot_mask=False):
         super().__init__()
-        self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
-        self.norm_input = torch.nn.LayerNorm(proj_channels)
-
-        self.global_slot_mask = global_slot_mask
-        if global_slot_mask:
-            hidden_dim = proj_channels * 4
-            self.global_slot_mask_layer = torch.nn.Sequential(
-                        torch.nn.Linear(proj_channels, hidden_dim),
-                        torch.nn.ReLU(),
-                        # torch.nn.Sigmoid(),
-                        RowNormalize(),
-                        torch.nn.Dropout(0.3),
-                        torch.nn.Linear(hidden_dim, num_queries * num_layers),
-                        torch.nn.ReLU(),
-                        # torch.nn.Sigmoid(),
-                        RowNormalize(),
-                        # torch.nn.Dropout(0.25),
-                    )
+        # self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
+        self.norm_input = torch.nn.LayerNorm(in_channels)
         
         self.slot_mask = slot_mask
-        self.gnn_pooling = gnn_pooling
 
-        in_dim = proj_channels
+        in_dim = in_channels
         if slot_mask:
             self.boqs = torch.nn.ModuleList([
                 BoQBlockWithMask(in_dim, num_queries, nheads=in_dim//64, mlp=mlp, hidden_layer=hidden_layer, in_channels=in_channels) for _ in range(num_layers)])
         else:
             self.boqs = torch.nn.ModuleList([
                 BoQBlock(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])
-        if gnn_pooling:
-            self.gnn_pooling_head = GNNPoolingHead(in_dim, row_dim, num_layers=num_layers//2)
         
         self.fc = torch.nn.Linear(num_layers*num_queries, row_dim)
         
     def forward(self, x, cls=None):
         # reduce input dimension using 3x3 conv when using ResNet
-        x = self.proj_c(x)
+        # x = self.proj_c(x)
         x = x.flatten(2).permute(0, 2, 1)
         x = self.norm_input(x)
-        
-        if self.global_slot_mask:
-            global_feat = x.mean(dim=1)  # [B, in_dim]
-            global_mask = self.global_slot_mask_layer(global_feat)  # [B, num_queries * num_layers]
-            global_mask = global_mask[:, :, None]  # [B, num_queries * num_layers, 1]
 
         outs = []
         attns = []
@@ -258,7 +197,10 @@ class BoQ(torch.nn.Module):
             if self.slot_mask:
                 x, out, attn, mask, q = self.boqs[i](x, cls)
                 self.masks.append(mask)
-                masks_std.append(mask.std(dim=1).mean(dim=0))
+                # mask [B, num_queries, 1]
+                masks_std.append(mask.std(dim=0))
+                # masks_std.append(mask.std(dim=0))
+                # print(masks_std[0].shape)
             else:
                 x, out, attn, q = self.boqs[i](x)
             outs.append(out)
@@ -266,16 +208,10 @@ class BoQ(torch.nn.Module):
             qs.append(q)
         
         masks_std = torch.stack(masks_std, dim=0).mean(dim=0) if self.slot_mask else 0
-        masks_std = global_mask.std(dim=1).mean(dim=0) if self.global_slot_mask else masks_std
 
         out = torch.cat(outs, dim=1) # [B, num_layers * num_queries, in_dim]
-        if self.global_slot_mask:
-            out = out * global_mask # [B, num_layers * num_queries, in_dim]
 
-        if not self.gnn_pooling:
-            out = self.fc(out.permute(0, 2, 1))
-            out = out.flatten(1)
-        else:
-            out = self.gnn_pooling_head(out)
+        out = self.fc(out.permute(0, 2, 1))
+        out = out.flatten(1)
         out = torch.nn.functional.normalize(out, p=2, dim=-1)
         return out, attns, qs, masks_std

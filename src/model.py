@@ -100,13 +100,15 @@ class BoQModel(L.LightningModule):
         # compute loss
         loss = self.compute_loss(descriptors, labels)
         diversity = self.query_diversity_loss(queries)
-        masks_std_loss = (masks_std - 0.3)**2
-        total_loss = loss +  diversity + masks_std_loss
-        self.log("masks_std", masks_std, prog_bar=True, logger=True)
+        masks_std_loss = -masks_std.mean() * 0.01  # scale the std loss
+        total_loss = loss + masks_std_loss
+        self.log("masks_std_mean", masks_std.mean(), prog_bar=True, logger=True)
+        self.log("masks_std_max", masks_std.max(), prog_bar=True, logger=True)
+        self.log("masks_std_min", masks_std.min(), prog_bar=True, logger=True)
         self.log("loss", loss, prog_bar=True, logger=True)
         self.log("diversity_loss", diversity, prog_bar=True, logger=True)
         self.log("total_loss", total_loss, prog_bar=True, logger=True)
-        return loss
+        return total_loss
 
     def on_train_epoch_end(self):
         # reload the dataframes to shuffle in-city
