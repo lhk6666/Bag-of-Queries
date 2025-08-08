@@ -11,10 +11,10 @@ import lightning as L
 from torch.utils.data.dataloader import Dataset, DataLoader
 from torchvision.transforms import v2  as T
 
-from src.dataloaders import GSVCitiesDataset
-from src.dataloaders import PittsburghDataset
-from src.dataloaders import MapillarySLSDataset
-from src.dataloaders import NordlandDataset
+from boq.src.dataloaders import GSVCitiesDataset
+from boq.src.dataloaders import PittsburghDataset
+from boq.src.dataloaders import MapillarySLSDataset
+from boq.src.dataloaders import NordlandDataset
 
 class VPRDataModule(L.LightningDataModule):
     def __init__(

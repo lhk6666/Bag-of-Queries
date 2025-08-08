@@ -1,11 +1,11 @@
-from src.model import BoQModel
-from src.backbones import DinoV2, ResNet
-from src.boq import BoQ
+from boq.src.model import BoQModel
+from boq.src.backbones import DinoV2, ResNet
+from boq.src.boq import BoQ
 import torch
 from torchvision import transforms
 from PIL import Image
 import argparse
-from config.hyperparams import HyperParams
+from boq.config.hyperparams import HyperParams
 import faiss
 import cv2
 import onnx, onnxruntime as ort

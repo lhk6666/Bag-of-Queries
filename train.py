@@ -10,12 +10,12 @@ from lightning.pytorch import callbacks
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from src.utils import display_datasets_stats
-from src.backbones import DinoV2, ResNet
-from src.boq import BoQ
-from src.model import BoQModel
-from src.dataloaders.datamodule import VPRDataModule
-from utils import hyper_params_getter
+from boq.src.utils import display_datasets_stats
+from boq.src.backbones import DinoV2, ResNet
+from boq.src.boq import BoQ
+from boq.src.model import BoQModel
+from boq.src.dataloaders.datamodule import VPRDataModule
+from boq.utils import hyper_params_getter
 
 def train(hparams, dev_mode=False):
     seed_everything(hparams.seed, workers=True)

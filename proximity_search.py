@@ -1,11 +1,11 @@
 import torch
 import torch
-from utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ, infer_single_image_edge, load_onnx_model
+from boq.utils import load_model, infer_single_image, hyper_params_getter, IndexIVFPQ, infer_single_image_edge, load_onnx_model
 import time
 import os
 import glob
 import numpy as np
-from config.models import ModelName
+from boq.config.models import ModelName
 import faiss
 
 class ProximitySearcher:
@@ -84,6 +84,7 @@ class ProximitySearcher:
             else:
                 emb = infer_single_image_edge(self.model, image)
         query_np = emb.detach().cpu().numpy().astype('float32') if not self.use_onnx else emb.astype('float32')
+        self.query_np = query_np
         
         if rerank:
             distances, indices = self.index.search(query_np, top_k, rerank=rerank)

@@ -3,8 +3,8 @@ import torch
 import os
 from tqdm import tqdm
 import glob
-from utils import load_model, infer_single_image, hyper_params_getter
-from config.models import ModelName
+from boq.utils import load_model, infer_single_image, hyper_params_getter
+from boq.config.models import ModelName
 from pathlib import Path
 import re
 

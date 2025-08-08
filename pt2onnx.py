@@ -1,5 +1,5 @@
 import torch
-from utils import hyper_params_getter, load_model, build_transform
+from boq.utils import hyper_params_getter, load_model, build_transform
 import numpy as np
 import cv2
 from PIL import Image

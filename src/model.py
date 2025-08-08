@@ -10,7 +10,7 @@ import torch
 import lightning as L
 from pytorch_metric_learning import losses, miners
 
-from src import utils
+from boq.src import utils
 
 class BoQModel(L.LightningModule):
     def __init__(
