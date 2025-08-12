@@ -84,8 +84,6 @@ def load_model(hparams, ckpt_path: str, device: str = "cuda:0"):
         num_layers=hparams.num_layers,
         row_dim=hparams.output_dim//hparams.channel_proj,
         slot_mask=hparams.slot_mask,
-        mlp=hparams.mlp,
-        hidden_layer=hparams.hidden_layer,
     )
     model = BoQModel.load_from_checkpoint(
         ckpt_path,
@@ -236,12 +234,8 @@ def parse_args():
     parser.add_argument("--dim",        type=int, help="Output dimensionality.")
 
     parser.add_argument("--slotmask", type=str, help="Slot mask for the model.")
-    parser.add_argument("--mlp", type=str, help="Use MLP for slot mask in BoQ.")
-    parser.add_argument("--hidden_layer", type=str, help="Use hidden layer in slot mask MLP.")
     parser.add_argument("--num_layers", type=int, help="Number of layers in the BoQ model.")
     parser.add_argument("--num_queries", type=int, help="Number of queries in the BoQ model.")
-    parser.add_argument("--gnn_pooling", type=str, help="Use GNN pooling in BoQ.")
-    parser.add_argument("--global_slot_mask", type=str, help="Use global slot mask in BoQ.")
 
     return parser.parse_args()
 
@@ -286,32 +280,4 @@ def hyper_params_getter():
             hparams.slot_mask = False
         else:
             raise ValueError("slotmask should be either 'true' or 'false'")
-    if args.mlp:
-        if args.mlp.lower() == "true":
-            hparams.mlp = True
-        elif args.mlp.lower() == "false":
-            hparams.mlp = False
-        else:
-            raise ValueError("mlp should be either 'true' or 'false'")
-    if args.hidden_layer:
-        if args.hidden_layer.lower() == "true":
-            hparams.hidden_layer = True
-        elif args.hidden_layer.lower() == "false":
-            hparams.hidden_layer = False
-        else:
-            raise ValueError("hidden_layer should be either 'true' or 'false'")
-    if args.gnn_pooling:
-        if args.gnn_pooling.lower() == "true":
-            hparams.gnn_pooling = True
-        elif args.gnn_pooling.lower() == "false":
-            hparams.gnn_pooling = False
-        else:
-            raise ValueError("gnn_pooling should be either 'true' or 'false'")
-    if args.global_slot_mask:
-        if args.global_slot_mask.lower() == "true":
-            hparams.global_slot_mask = True
-        elif args.global_slot_mask.lower() == "false":
-            hparams.global_slot_mask = False
-        else:
-            raise ValueError("global_slot_mask should be either 'true' or 'false'")    
     return hparams

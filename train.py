@@ -48,10 +48,6 @@ def train(hparams, dev_mode=False):
         num_layers=hparams.num_layers,
         row_dim=hparams.output_dim//hparams.channel_proj,
         slot_mask=hparams.slot_mask,
-        mlp=hparams.mlp,
-        hidden_layer=hparams.hidden_layer,
-        gnn_pooling=hparams.gnn_pooling,
-        global_slot_mask=hparams.global_slot_mask,
     )
     
     # Define the entire Lightning model for training and validation

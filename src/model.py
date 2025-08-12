@@ -12,7 +12,79 @@ from pytorch_metric_learning import losses, miners
 
 from src import utils
 
+import matplotlib
+matplotlib.use('Agg')  
 from matplotlib import pyplot as plt
+import io
+import PIL.Image
+from torchvision.transforms import ToTensor
+
+
+def plot_attention_maps(writer, tag, attention_weights, global_step):
+    # Select 4 samples from the batch (indices 0, 128, 256, 384)
+    batch_size = attention_weights.shape[0]
+    sample_indices = [0, batch_size//4, batch_size//2, 3*batch_size//4]
+    
+    cols = 2
+    rows = 2
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 3))
+    axes = axes.flatten()  # Make it easier to index
+    
+    for i, sample_idx in enumerate(sample_indices):
+        if sample_idx < batch_size:
+            attn_sample = attention_weights[sample_idx].detach().cpu()  # Shape: (H, L, S) or (L, S)
+            
+            ax = axes[i]
+            im = ax.imshow(attn_sample, cmap='viridis', aspect='auto')
+            ax.set_title(f"Sample {sample_idx}")
+            ax.set_xlabel("Key Sequence")
+            ax.set_ylabel("Query Sequence")
+            ax.axis('off')
+
+    fig.tight_layout()
+    fig.colorbar(im, ax=axes, orientation='horizontal', fraction=.1)
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+
+    image = PIL.Image.open(buf)
+    image_tensor = ToTensor()(image)
+
+    writer.add_image(tag, image_tensor, global_step)
+
+    plt.close(fig)
+
+def plot_queries(writer, tag, queries, global_step):
+    # queries shape is (Q, C) - no batch dimension
+    
+    cols = 1
+    rows = 1
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4))
+    
+    query_sample = queries.detach().cpu()  # Shape: (Q, C)
+    
+    ax = axes if rows * cols == 1 else axes[0]
+    im = ax.imshow(query_sample.numpy(), cmap='viridis', aspect='auto')
+    ax.set_title(f"Queries Heatmap")
+    ax.set_xlabel("Feature Dimension")
+    ax.set_ylabel("Query Index")
+    plt.colorbar(im, ax=ax)
+
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+
+    image = PIL.Image.open(buf)
+    image_tensor = ToTensor()(image)
+
+    writer.add_image(tag, image_tensor, global_step)
+
+    plt.close(fig)
 
 class BoQModel(L.LightningModule):
     def __init__(
@@ -77,14 +149,15 @@ class BoQModel(L.LightningModule):
     
     def query_diversity_loss(self, queries):
         # queries: [B, Q, C]
-        B, Q, C = queries.shape
+        B, Q, _ = queries.shape
         loss = 0.0
-        for b in range(B):
-            q = torch.nn.functional.normalize(queries[b], p=2, dim=1)  # [Q, C]
-            gram = torch.matmul(q, q.t())  # [Q, Q]
-            I = torch.eye(Q, device=gram.device, dtype=gram.dtype)
-            loss += ((gram - I) ** 2).mean()
-        return loss / B
+
+        q = torch.nn.functional.normalize(queries, p=2, dim=2)  # [B, Q, C]
+        gram = torch.matmul(q, q.transpose(1, 2))  # [B, Q, Q]
+        I = torch.eye(Q, device=gram.device, dtype=gram.dtype)
+        I = I[None, :, :].repeat(B, 1, 1)  # [B, Q, Q]
+        loss = ((gram - I) ** 2).mean()
+        return loss 
 
     
     def training_step(self, batch, batch_idx):
@@ -96,19 +169,42 @@ class BoQModel(L.LightningModule):
         
         # forward pass
         descriptors, attentions, queries, masks_std = self(images)
-        queries = torch.cat(queries, dim=1)
+        # queries = torch.cat(queries, dim=1)
         # compute loss
         loss = self.compute_loss(descriptors, labels)
-        diversity = self.query_diversity_loss(queries)
-        masks_std_loss = -masks_std.mean() * 0.01  # scale the std loss
-        total_loss = loss + masks_std_loss
-        self.log("masks_std_mean", masks_std.mean(), prog_bar=True, logger=True)
-        self.log("masks_std_max", masks_std.max(), prog_bar=True, logger=True)
-        self.log("masks_std_min", masks_std.min(), prog_bar=True, logger=True)
+        # diversity = self.query_diversity_loss(queries)
+        if self.trainer.global_step % 489 == 0 and not self.silent:
+            # log attention maps for the first batch
+            if isinstance(attentions, (list, tuple)):
+                for i, attn_tensor in enumerate(attentions):
+                    # attn_tensor should be the actual (N, H, L, S) tensor
+                    plot_attention_maps(
+                        writer=self.logger.experiment,
+                        tag=f"attention_maps/layer_{i+1}",  # Use a unique tag for each layer!
+                        attention_weights=attn_tensor,
+                        global_step=self.trainer.global_step
+                    )
+            else: # If attentions is just a single tensor
+                plot_attention_maps(
+                    writer=self.logger.experiment,
+                    tag="attention_maps/single_layer",
+                    attention_weights=attentions,
+                    global_step=self.trainer.global_step
+                )
+            for i, query_tensor in enumerate(queries):
+                plot_queries(
+                    writer=self.logger.experiment,
+                    tag=f"queries/layer_{i+1}",
+                    queries=query_tensor,
+                    global_step=self.trainer.global_step
+                )
+            
+
+        self.log("masks_std", masks_std, prog_bar=True, logger=True)
         self.log("loss", loss, prog_bar=True, logger=True)
-        self.log("diversity_loss", diversity, prog_bar=True, logger=True)
-        self.log("total_loss", total_loss, prog_bar=True, logger=True)
-        return total_loss
+        # self.log("diversity_loss", diversity, prog_bar=True, logger=True)
+
+        return loss
 
     def on_train_epoch_end(self):
         # reload the dataframes to shuffle in-city
