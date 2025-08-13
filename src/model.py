@@ -173,7 +173,7 @@ class BoQModel(L.LightningModule):
         # compute loss
         loss = self.compute_loss(descriptors, labels)
         # diversity = self.query_diversity_loss(queries)
-        if self.trainer.global_step % 489 == 0 and not self.silent:
+        if self.trainer.global_step % 300 == 0 and not self.silent:
             # log attention maps for the first batch
             if isinstance(attentions, (list, tuple)):
                 for i, attn_tensor in enumerate(attentions):
