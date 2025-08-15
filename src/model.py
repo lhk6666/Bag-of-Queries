@@ -19,6 +19,43 @@ import io
 import PIL.Image
 from torchvision.transforms import ToTensor
 
+def plot_output_gates(writer, tag, out_gate_samples, global_step):
+    # out_gate_samples shape: (N, Q) where N is batch size and Q is number of queries
+    N, Q = out_gate_samples.shape
+    
+    # Select up to 4 samples to plot
+    sample_indices = [0, N//4, N//2, 3*N//4] if N >= 4 else list(range(N))
+    
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+    
+    # Create x-axis (query indices)
+    x = range(Q)
+    
+    # Plot waveforms for selected samples
+    for i, sample_idx in enumerate(sample_indices):
+        if sample_idx < N:
+            gate_values = out_gate_samples[sample_idx].detach().cpu().numpy()
+            ax.plot(x, gate_values, label=f'Sample {sample_idx}', linewidth=2, alpha=0.7)
+    
+    ax.set_xlabel('Query Index')
+    ax.set_ylabel('Gate Value')
+    ax.set_title('Output Gate Values Across Queries')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    fig.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    
+    image = PIL.Image.open(buf)
+    image_tensor = ToTensor()(image)
+    
+    writer.add_image(tag, image_tensor, global_step)
+    
+    plt.close(fig)
+
 
 def plot_attention_maps(writer, tag, attention_weights, global_step):
     # Select 4 samples from the batch (indices 0, 128, 256, 384)
@@ -114,7 +151,7 @@ class BoQModel(L.LightningModule):
 
     def configure_optimizers(self):
         optimizer_params = [
-            {"params": self.backbone.parameters(),   "lr": self.lr, "weight_decay": self.weight_decay},
+            {"params": self.backbone.parameters(),   "lr": self.lr * 0.5, "weight_decay": self.weight_decay},
             {"params": self.aggregator.parameters(), "lr": self.lr, "weight_decay": self.weight_decay},
         ]
         optimizer = torch.optim.AdamW(optimizer_params)
@@ -144,9 +181,9 @@ class BoQModel(L.LightningModule):
     
     def forward(self, x):
         x, cls = self.backbone(x)
-        x, attns, queries, masks_std = self.aggregator(x, cls)
-        return x, attns, queries, masks_std
-    
+        x, attns, queries, out_gate_samples = self.aggregator(x, cls)
+        return x, attns, queries, out_gate_samples
+
     def query_diversity_loss(self, queries):
         # queries: [B, Q, C]
         B, Q, _ = queries.shape
@@ -168,7 +205,7 @@ class BoQModel(L.LightningModule):
         labels = labels.flatten() # P*K
         
         # forward pass
-        descriptors, attentions, queries, masks_std = self(images)
+        descriptors, attentions, queries, out_gate_samples = self(images)
         # queries = torch.cat(queries, dim=1)
         # compute loss
         loss = self.compute_loss(descriptors, labels)
@@ -198,9 +235,15 @@ class BoQModel(L.LightningModule):
                     queries=query_tensor,
                     global_step=self.trainer.global_step
                 )
+            if out_gate_samples is not None:
+                plot_output_gates(
+                    writer=self.logger.experiment,
+                    tag="output_gates",
+                    out_gate_samples=out_gate_samples,
+                    global_step=self.trainer.global_step
+                )
             
 
-        self.log("masks_std", masks_std, prog_bar=True, logger=True)
         self.log("loss", loss, prog_bar=True, logger=True)
         # self.log("diversity_loss", diversity, prog_bar=True, logger=True)
 
@@ -224,7 +267,7 @@ class BoQModel(L.LightningModule):
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         images, _ = batch
-        descriptors, attentions, _, _ = self(images)
+        descriptors, _, _, _ = self(images)
         descriptors = descriptors.detach().cpu()#.numpy()
         
         if dataloader_idx not in self.validation_outputs:

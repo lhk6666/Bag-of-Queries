@@ -11,7 +11,7 @@ from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from src.utils import display_datasets_stats
-from src.backbones import DinoV2, ResNet
+from src.backbones import DinoV3, DinoV2, ResNet
 from src.boq import BoQ
 from src.model import BoQModel
 from src.dataloaders.datamodule import VPRDataModule
@@ -34,6 +34,13 @@ def train(hparams, dev_mode=False):
         backbone = ResNet(backbone_name=hparams.backbone_name, unfreeze_n_blocks=hparams.unfreeze_n_blocks, crop_last_block=True)
         train_img_size = (320, 320)
         val_img_size = (384, 384)
+        hparams.train_img_size = train_img_size
+        hparams.val_img_size = val_img_size
+    elif "dinov3" in hparams.backbone_name:
+        backbone = DinoV3(backbone_name=hparams.backbone_name, unfreeze_n_blocks=hparams.unfreeze_n_blocks)
+        train_img_size = (224, 224)
+        val_img_size = (322, 322)
+        hparams.backbone_name = backbone.backbone_name
         hparams.train_img_size = train_img_size
         hparams.val_img_size = val_img_size
     else:

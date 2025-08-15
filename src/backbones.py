@@ -74,6 +74,80 @@ class DinoV2(torch.nn.Module):
             x = x.permute(0, 2, 1).view(B, C, H // patch_size, W // patch_size)
         return x, cls  # return the features and the [CLS] token
     
+class DinoV3(torch.nn.Module):
+    AVAILABLE_MODELS = [
+        'dinov3_vits16',
+        'dinov3_vitb16',
+        'dinov3_vitl16',
+        'dinov3_vitg16'
+    ]
+    REPO_DIR = "/home/dragon_llm/Backbone/DINOV3/dinov3"
+    WEIGHT_DIR = "/home/dragon_llm/Backbone/DINOV3/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+
+    def __init__(
+        self,
+        backbone_name="dinov3_vitb16",
+        unfreeze_n_blocks=2,
+        reshape_output=True,
+    ):
+        super().__init__()
+        
+        self.backbone_name = backbone_name
+        self.unfreeze_n_blocks = unfreeze_n_blocks
+        self.reshape_output = reshape_output
+        
+        # make sure the backbone_name is in the available models
+        if self.backbone_name not in self.AVAILABLE_MODELS:
+            print(f"Backbone {self.backbone_name} is not recognized!, using dinov3_vitb16")
+            self.backbone_name = "dinov3_vitb16"
+
+        self.dino = torch.hub.load(self.REPO_DIR, 'dinov3_vitb16', source='local', weights=self.WEIGHT_DIR)
+
+        # freeze all parameters
+        for param in self.dino.parameters():
+            param.requires_grad = False
+        
+        # unfreeze the last few blocks
+        for block in self.dino.blocks[ -unfreeze_n_blocks : ]:
+            for param in block.parameters():
+                param.requires_grad = True
+        
+        self.out_channels = self.dino.embed_dim
+        
+    @property
+    def patch_size(self):
+        return self.dino.patch_embed.patch_size[0]  # Assuming square patches
+    
+    def forward(self, x):
+        B, _, Himg, Wimg = x.shape
+
+        tokens, (H_grid, W_grid) = self.dino.prepare_tokens_with_masks(x) 
+        
+        n_sto = self.dino.n_storage_tokens
+        prefix = 1 + n_sto  # CLS + storage
+
+        with torch.no_grad():
+            for blk in self.dino.blocks[: -self.unfreeze_n_blocks]:
+                rope = self.dino.rope_embed(H=H_grid, W=W_grid) if getattr(self.dino, "rope_embed", None) is not None else None
+                tokens = blk(tokens, rope)
+
+        for blk in self.dino.blocks[-self.unfreeze_n_blocks:]:
+            rope = self.dino.rope_embed(H=H_grid, W=W_grid) if getattr(self.dino, "rope_embed", None) is not None else None
+            tokens = blk(tokens, rope)
+
+        x_norm = self.dino.norm(tokens)
+        x_norm_cls_reg = x_norm[:, :prefix]           # [CLS, storage...]
+        x_norm_patch   = x_norm[:, prefix:]           # patch tokens
+        cls = x_norm_cls_reg[:, 0]
+        x   = x_norm_patch
+
+        if self.reshape_output:
+            B2, T, C = x.shape
+            assert T == H_grid * W_grid, f"Expected {H_grid * W_grid} tokens, got {T}."
+            x = x.permute(0, 2, 1).reshape(B, C, H_grid, W_grid)
+
+        return x, cls
+
     
 class ResNet(nn.Module):
     AVAILABLE_MODELS = {
