@@ -22,13 +22,12 @@ class DinoV2(torch.nn.Module):
         self,
         backbone_name="dinov2_vitb14",
         unfreeze_n_blocks=2,
-        reshape_output=True,
     ):
         super().__init__()
         
         self.backbone_name = backbone_name
         self.unfreeze_n_blocks = unfreeze_n_blocks
-        self.reshape_output = reshape_output
+
         
         # make sure the backbone_name is in the available models
         if self.backbone_name not in self.AVAILABLE_MODELS:
@@ -41,10 +40,11 @@ class DinoV2(torch.nn.Module):
         for param in self.dino.parameters():
             param.requires_grad = False
         
-        # unfreeze the last few blocks
-        for block in self.dino.blocks[ -unfreeze_n_blocks : ]:
-            for param in block.parameters():
-                param.requires_grad = True
+        if unfreeze_n_blocks > 0:
+            # unfreeze the last few blocks
+            for block in self.dino.blocks[ -unfreeze_n_blocks : ]:
+                for param in block.parameters():
+                    param.requires_grad = True
         
         self.out_channels = self.dino.embed_dim
         
@@ -54,24 +54,24 @@ class DinoV2(torch.nn.Module):
     
     def forward(self, x):
         B, _, H, W = x.shape
-        # No need to compute gradients for frozen layers
-        with torch.no_grad():
+        if self.unfreeze_n_blocks > 0:
+            # No need to compute gradients for frozen layers
+            with torch.no_grad():
+                x = self.dino.prepare_tokens_with_masks(x)
+                for blk in self.dino.blocks[ : -self.unfreeze_n_blocks]:
+                    x = blk(x)
+
+            # Last blocks are trained
+            for blk in self.dino.blocks[-self.unfreeze_n_blocks : ]:
+                x = blk(x)
+        else:
             x = self.dino.prepare_tokens_with_masks(x)
-            for blk in self.dino.blocks[ : -self.unfreeze_n_blocks]:
+            for blk in self.dino.blocks:
                 x = blk(x)
 
-        # Last blocks are trained
-        for blk in self.dino.blocks[-self.unfreeze_n_blocks : ]:
-            x = blk(x)
-            
+        cls = x[:, 0]  # [B, C]  
         x = x[:, 1:] # remove the [CLS] token
-        cls = x[:, 0]  # [B, C]
         
-        # reshape the output tensor to B, C, H, W
-        if self.reshape_output:
-            _, _, C = x.shape # or C = self.embed_dim
-            patch_size = self.patch_size
-            x = x.permute(0, 2, 1).view(B, C, H // patch_size, W // patch_size)
         return x, cls  # return the features and the [CLS] token
     
 class DinoV3(torch.nn.Module):
@@ -88,29 +88,28 @@ class DinoV3(torch.nn.Module):
         self,
         backbone_name="dinov3_vitb16",
         unfreeze_n_blocks=2,
-        reshape_output=True,
     ):
         super().__init__()
         
         self.backbone_name = backbone_name
         self.unfreeze_n_blocks = unfreeze_n_blocks
-        self.reshape_output = reshape_output
         
         # make sure the backbone_name is in the available models
         if self.backbone_name not in self.AVAILABLE_MODELS:
             print(f"Backbone {self.backbone_name} is not recognized!, using dinov3_vitb16")
             self.backbone_name = "dinov3_vitb16"
 
-        self.dino = torch.hub.load(self.REPO_DIR, 'dinov3_vitb16', source='local', weights=self.WEIGHT_DIR)
+        self.dino = torch.hub.load('facebookresearch/dinov3', self.backbone_name)
 
         # freeze all parameters
         for param in self.dino.parameters():
             param.requires_grad = False
         
-        # unfreeze the last few blocks
-        for block in self.dino.blocks[ -unfreeze_n_blocks : ]:
-            for param in block.parameters():
-                param.requires_grad = True
+        if unfreeze_n_blocks > 0:
+            # unfreeze the last few blocks
+            for block in self.dino.blocks[ -unfreeze_n_blocks : ]:
+                for param in block.parameters():
+                    param.requires_grad = True
         
         self.out_channels = self.dino.embed_dim
         
@@ -119,32 +118,30 @@ class DinoV3(torch.nn.Module):
         return self.dino.patch_embed.patch_size[0]  # Assuming square patches
     
     def forward(self, x):
-        B, _, Himg, Wimg = x.shape
+        # No need to compute gradients for frozen layers
+        x, rope = self.dino.prepare_tokens_with_masks(x)
+        H, W = rope
+        if self.unfreeze_n_blocks > 0:
+            with torch.no_grad():
+                for blk in self.dino.blocks[ : -self.unfreeze_n_blocks]:
+                    rope_sincos = self.dino.rope_embed(H=H, W=W) 
+                    x = blk(x, rope_sincos)
 
-        tokens, (H_grid, W_grid) = self.dino.prepare_tokens_with_masks(x) 
+            # Last blocks are trained
+            for blk in self.dino.blocks[-self.unfreeze_n_blocks : ]:
+                rope_sincos = self.dino.rope_embed(H=H, W=W)
+                x = blk(x, rope_sincos)
+        else:
+            for blk in self.dino.blocks:
+                rope_sincos = self.dino.rope_embed(H=H, W=W)
+                x = blk(x, rope_sincos)
+    
+        cls = x[:, 0]  # [B, C]  
+        x = x[:, 5:] # remove the [CLS] token
         
-        n_sto = self.dino.n_storage_tokens
-        prefix = 1 + n_sto  # CLS + storage
-
-        with torch.no_grad():
-            for blk in self.dino.blocks[: -self.unfreeze_n_blocks]:
-                rope = self.dino.rope_embed(H=H_grid, W=W_grid) if getattr(self.dino, "rope_embed", None) is not None else None
-                tokens = blk(tokens, rope)
-
-        for blk in self.dino.blocks[-self.unfreeze_n_blocks:]:
-            rope = self.dino.rope_embed(H=H_grid, W=W_grid) if getattr(self.dino, "rope_embed", None) is not None else None
-            tokens = blk(tokens, rope)
-
-        x_norm = self.dino.norm(tokens)
-        x_norm_cls_reg = x_norm[:, :prefix]           # [CLS, storage...]
-        x_norm_patch   = x_norm[:, prefix:]           # patch tokens
-        cls = x_norm_cls_reg[:, 0]
-        x   = x_norm_patch
-
-        if self.reshape_output:
-            B2, T, C = x.shape
-            assert T == H_grid * W_grid, f"Expected {H_grid * W_grid} tokens, got {T}."
-            x = x.permute(0, 2, 1).reshape(B, C, H_grid, W_grid)
+        # features = self.dino.forward_features(x)[0]
+        # cls = features["x_norm_clstoken"]  # [B, C]
+        # x = features["x_norm_patchtokens"]  # [B, N, C]
 
         return x, cls
 

@@ -9,7 +9,7 @@
 import torch
 import lightning as L
 from pytorch_metric_learning import losses, miners
-
+import torch.nn.functional as F
 from src import utils
 
 import matplotlib
@@ -151,7 +151,7 @@ class BoQModel(L.LightningModule):
 
     def configure_optimizers(self):
         optimizer_params = [
-            {"params": self.backbone.parameters(),   "lr": self.lr * 0.5, "weight_decay": self.weight_decay},
+            {"params": self.backbone.parameters(),   "lr": self.lr * 0.1, "weight_decay": self.weight_decay},
             {"params": self.aggregator.parameters(), "lr": self.lr, "weight_decay": self.weight_decay},
         ]
         optimizer = torch.optim.AdamW(optimizer_params)
@@ -181,7 +181,7 @@ class BoQModel(L.LightningModule):
     
     def forward(self, x):
         x, cls = self.backbone(x)
-        x, attns, queries, out_gate_samples = self.aggregator(x, cls)
+        x, attns, out_gate_samples, queries = self.aggregator(x, cls)
         return x, attns, queries, out_gate_samples
 
     def query_diversity_loss(self, queries):
@@ -196,7 +196,6 @@ class BoQModel(L.LightningModule):
         loss = ((gram - I) ** 2).mean()
         return loss 
 
-    
     def training_step(self, batch, batch_idx):
         images, labels = batch
         # images.shape is (P, K, C, H, W) with P: number of places, K: number of views per place
@@ -209,8 +208,8 @@ class BoQModel(L.LightningModule):
         # queries = torch.cat(queries, dim=1)
         # compute loss
         loss = self.compute_loss(descriptors, labels)
-        # diversity = self.query_diversity_loss(queries)
-        if self.trainer.global_step % 300 == 0 and not self.silent:
+        # diversity = self.query_diversity_loss(queries[0])
+        if self.trainer.global_step % 100 == 0 and not self.silent:
             # log attention maps for the first batch
             if isinstance(attentions, (list, tuple)):
                 for i, attn_tensor in enumerate(attentions):
@@ -232,10 +231,11 @@ class BoQModel(L.LightningModule):
                 plot_queries(
                     writer=self.logger.experiment,
                     tag=f"queries/layer_{i+1}",
-                    queries=query_tensor,
+                    queries=query_tensor[0],
                     global_step=self.trainer.global_step
                 )
-            if out_gate_samples is not None:
+            if out_gate_samples is not None and len(out_gate_samples) > 0:
+                out_gate_samples = torch.cat(out_gate_samples, dim=0).squeeze(-1)  # Stack to create a single tensor
                 plot_output_gates(
                     writer=self.logger.experiment,
                     tag="output_gates",
@@ -245,7 +245,6 @@ class BoQModel(L.LightningModule):
             
 
         self.log("loss", loss, prog_bar=True, logger=True)
-        # self.log("diversity_loss", diversity, prog_bar=True, logger=True)
 
         return loss
 

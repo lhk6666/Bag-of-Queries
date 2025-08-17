@@ -7,7 +7,7 @@ class HyperParams:
         ## BoQ config:
         self.channel_proj: int = 512
         self.num_queries: int = 64
-        self.num_layers: int = 2
+        self.num_layers: int = 1
         self.output_dim: int = 8192
         self.slot_mask: bool = True  # use slot mask in BoQ
 
@@ -32,11 +32,11 @@ class HyperParams:
         self.batch_size: int = 180         # batch size is the number of places per batch
         self.img_per_place: int = 4          # number of images per place
         self.max_epochs: int = 40
-        self.warmup_epochs: int = 10         # number of linear warmup epochs (not iterations)
+        self.warmup_epochs: int = 5         # number of linear warmup epochs (not iterations)
         self.lr: float = 1e-4                # learning rate
         self.weight_decay: float = 1e-4
-        self.lr_mul: float = 0.05
-        self.milestones: list = [15, 25, 35]
+        self.lr_mul: float = 0.1
+        self.milestones: list = [5, 15, 25]
         self.num_workers: int = 8
         self.precision: str = "16-mixed"      # "16-mixed" or "32" for training precision
         
