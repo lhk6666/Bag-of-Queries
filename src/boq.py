@@ -103,8 +103,11 @@ class CLSBinner(nn.Module):
         super().__init__()
         self.n_bins = n_bins
         # 初始化中心在 [-1,1] 上平均分布
-        centers = torch.linspace(-1.0, 1.0, steps=n_bins)
-        self.mu = nn.Parameter(centers)         # [N]
+        self.alpha = nn.Parameter(torch.tensor(0.4))  # learnable min
+        self.beta  = nn.Parameter(torch.tensor(0.8))   # learnable max
+        base = torch.linspace(0, 1, steps=n_bins, device=self.alpha.device)
+        centers = self.alpha + (self.beta - self.alpha) * base  # [n_bins]
+        self.mu = nn.Parameter(centers)  # [n_bins]
         self.log_sigma = nn.Parameter(torch.log(torch.tensor(sigma)))
         self.use_sinkhorn = use_sinkhorn
         self.sinkhorn_iters = sinkhorn_iters
@@ -134,8 +137,7 @@ class CLSBinner(nn.Module):
           s: [B, Nx]      CLS↔x 的余弦相似度
         """
         # 1) 计算 CLS↔x 的余弦相似度（完全可微）
-        s = torch.einsum('bid,bjd->bij', Kcls, Kx).squeeze(1)    # [B, Nx]  ∈ [-1,1]
-        print(s)
+        s = F.cosine_similarity(Kx, Kcls, dim=-1)    # [B, Nx]  ∈ [-1,1]
 
         # 2) RBF 软分箱
         sigma = torch.clamp(self.log_sigma.exp(), min=1e-3)
@@ -143,7 +145,6 @@ class CLSBinner(nn.Module):
         dist2 = (s.unsqueeze(-1) - self.mu.view(1, 1, -1)) ** 2  # [B,Nx,N]
         logits = - dist2 / (2 * sigma**2 + 1e-6)
         P = torch.softmax(logits, dim=-1)                        # [B,Nx,N]
-
         # 3) 可选：Sinkhorn 让每个簇拿到接近 Nx/N 的质量（仍可微）
         if self.use_sinkhorn:
             P = self._sinkhorn(P, self.sinkhorn_iters)
@@ -153,33 +154,52 @@ class CLSBinner(nn.Module):
 
 # ---------- Step 2: Query -> Cluster 路由，得到每个 query 的目标注意力 T ----------
 class QueryClusterRouter(nn.Module):
-    """
-    可学习的 query→cluster 路由矩阵 R ∈ R^{Q×N}，经 softmax 得到 Ŕ。
-    用 T_i = Σ_k Ŕ_{ik} * P_k 生成每个 query 的目标注意力分布（对 Nx 归一化）。
-    """
     def __init__(self, num_queries: int, num_clusters: int, temp_init: float = 1.0):
         super().__init__()
         self.num_queries = num_queries
         self.num_clusters = num_clusters
         self.logits = nn.Parameter(torch.zeros(num_queries, num_clusters))
-        nn.init.xavier_uniform_(self.logits, gain=0.01)
         self.log_temp = nn.Parameter(torch.log(torch.tensor(temp_init)))
+        # 用带偏置的初始化替换全零
+        self.reset_router_bias(strength=2.0, neg=-2.0, jitter=1, shuffle=False, seed=None)
+
+    @torch.no_grad()
+    def reset_router_bias(self, strength: float = 6.0, neg: float = -2.0,
+                          jitter: float = 0.1, shuffle: bool = False, seed: int | None = None):
+        """
+        用分工偏置初始化 logits：
+          - 每个 query 先被“指派”到一个 cluster（轮转分配）
+          - 被指派的 cluster 赋值为 `strength`，其它为 `neg`
+          - 加少量随机抖动，避免同质
+        注意：softmax 的温度会进一步影响实际尖锐度 → 有效差值是 (strength - neg)/temp
+        """
+        Q, N = self.num_queries, self.num_clusters
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        # 轮转分配：q -> (q mod N)
+        assign = torch.arange(Q) % N
+        if shuffle:
+            perm = torch.randperm(Q)
+            assign = assign[perm]  # 打乱，让每次运行分配顺序不同
+            # 如果你希望可重复，传入 seed
+
+        logits = torch.full((Q, N), neg)
+        logits[torch.arange(Q), assign] = strength
+
+        if jitter > 0:
+            logits = logits + jitter * torch.randn_like(logits)
+
+        self.logits.copy_(logits)
 
     def forward(self, P: torch.Tensor):
-        """
-        P: [B, Nx, N]   patch→cluster 分布
-        返回:
-          T:     [B, Q, Nx]  每个 query 的目标注意力
-          R_hat: [Q, N]      路由矩阵（行 softmax）
-        """
-        B, Nx, N = P.shape
-        Q = self.num_queries
         Ttemp = torch.clamp(self.log_temp.exp(), min=0.2, max=10.0)
-        R_hat = F.softmax(self.logits / Ttemp, dim=-1)           # [Q,N]
-        # P^T: [B,N,Nx]; T = R_hat @ P^T → [B,Q,Nx]
-        Pt = P.transpose(1, 2).contiguous()                      # [B,N,Nx]
-        T = torch.einsum('qn,bnk->bqk', R_hat, Pt)               # [B,Q,Nx]
+        # R_hat = F.softmax(self.logits / Ttemp, dim=-1)  # [Q,N]
+        R_hat = F.sigmoid(self.logits / Ttemp)  # [Q,N]
+        Pt = P.transpose(1, 2).contiguous()             # [B,N,Nx]
+        T = torch.einsum('qn,bnk->bqk', R_hat, Pt)      # [B,Q,Nx]
         T = T / (T.sum(dim=-1, keepdim=True) + 1e-6)
+        # print(T[0, 0])  # 打印第一个 batch 的第一个 query 的前 10 个注意力值
         return T, R_hat
 
 
@@ -194,16 +214,17 @@ class BoQWithProtoMask(nn.Module):
     只需指定：num_clusters (N) 与 num_queries (Q)。
     """
     def __init__(self, dim: int, num_queries: int, num_clusters: int, nheads: int = 8,
-                 alpha_init: float = 0.4, eps: float = 1e-3,
+                 alpha_init: float = 0.4, eps: float = 1e+2,
                  proto_scale_init: float = 20.0, proto_repel: float = 0.0,
                  router_temp_init: float = 1.0,
-                 kl_weight: float = 0.0, div_weight: float = 0.0):
+                 kl_weight: float = 0.0, div_weight: float = 0.0, mask_gain: float = 5.0):
         super().__init__()
         self.dim = dim
         self.num_queries = num_queries
         self.num_clusters = num_clusters
         self.nheads = nheads
         self.eps = eps
+        self.mask_gain = mask_gain
 
         # Queries & attentions
         self.queries = nn.Parameter(torch.randn(1, num_queries, dim))
@@ -214,7 +235,7 @@ class BoQWithProtoMask(nn.Module):
 
         # Step 1: CLS->Prototypes (in K-space)
         # self.protos = CLSPrototypes(dim, num_clusters, scale_init=proto_scale_init, repel_reg=proto_repel)
-        self.binners = CLSBinner(num_clusters, sigma=0.15, use_sinkhorn=True, sinkhorn_iters=5)
+        self.binners = CLSBinner(num_clusters, sigma=0.05, use_sinkhorn=True, sinkhorn_iters=5)
 
         # Step 2: Query->Cluster Router
         self.router = QueryClusterRouter(num_queries, num_clusters, temp_init=router_temp_init)
@@ -274,8 +295,9 @@ class BoQWithProtoMask(nn.Module):
         # ---- Step 3: add mask to cross-attn logits ----
         alpha = float(self._alpha.item())
         if alpha > 0:
-            log_bias = alpha * torch.log(T + self.eps)     # [B,Q,Nx]
-            attn_mask = log_bias.unsqueeze(1).repeat(1, H, 1, 1).reshape(B * H, Q, Nx)
+            log_bias = alpha * torch.log(T * self.eps)     # [B,Q,Nx]
+            attn_mask = self.mask_gain * log_bias.unsqueeze(1).repeat(1, H, 1, 1).reshape(B * H, Q, Nx)
+            attn_mask = torch.clamp(attn_mask, min=-10.0, max=10.0)  # 限制数值范围
         else:
             attn_mask = None
 
@@ -287,25 +309,25 @@ class BoQWithProtoMask(nn.Module):
         )                                                  # attn: [B,H,Q,Nx]
         out = self.norm_out(out)
 
-        # ---- Optional losses ----
-        losses = {}
-        total_aux_loss = torch.tensor(0.0, device=x.device)
+        # # ---- Optional losses ----
+        # losses = {}
+        # total_aux_loss = torch.tensor(0.0, device=x.device)
 
-        if self.kl_weight > 0:
-            # 让真实注意力靠近 T（多头平均后对齐）
-            A = attn.mean(dim=1)                           # [B,Q,Nx]
-            A = A / (A.sum(dim=-1, keepdim=True) + 1e-6)
-            kl = (A * (A.add(1e-6).log() - T.add(1e-6).log())).sum(dim=-1).mean()
-            losses["kl_loss"] = self.kl_weight * kl
-            total_aux_loss = total_aux_loss + losses["kl_loss"]
+        # if self.kl_weight > 0:
+        #     # 让真实注意力靠近 T（多头平均后对齐）
+        #     A = attn.mean(dim=1)                           # [B,Q,Nx]
+        #     A = A / (A.sum(dim=-1, keepdim=True) + 1e-6)
+        #     kl = (A * (A.add(1e-6).log() - T.add(1e-6).log())).sum(dim=-1).mean()
+        #     losses["kl_loss"] = self.kl_weight * kl
+        #     total_aux_loss = total_aux_loss + losses["kl_loss"]
 
-        if self.div_weight > 0:
-            # 多样性：惩罚 R_hat R_hat^T 的非对角
-            G = R_hat @ R_hat.t()                          # [Q,Q]
-            I = torch.eye(Q, device=G.device)
-            div = ((G - I) ** 2).sum() / (Q ** 2)
-            losses["div_loss"] = self.div_weight * div
-            total_aux_loss = total_aux_loss + losses["div_loss"]
+        # if self.div_weight > 0:
+        #     # 多样性：惩罚 R_hat R_hat^T 的非对角
+        #     G = R_hat @ R_hat.t()                          # [Q,Q]
+        #     I = torch.eye(Q, device=G.device)
+        #     div = ((G - I) ** 2).sum() / (Q ** 2)
+        #     losses["div_loss"] = self.div_weight * div
+        #     total_aux_loss = total_aux_loss + losses["div_loss"]
 
         # if self.protos.repel_reg > 0:
         #     losses["proto_repel"] = proto_loss
@@ -319,12 +341,12 @@ class BoQWithProtoMask(nn.Module):
         #     attn=attn.detach()
         # )
 
-        return x, out, attn.detach(), attn_mask, q
+        return x, out, attn.detach(), attn_mask, q, R_hat, s
 
 
 
 class BoQ(torch.nn.Module):
-    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False):
+    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_clusters=16, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False):
         super().__init__()
         # self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
         
@@ -333,12 +355,12 @@ class BoQ(torch.nn.Module):
         # self.norm_input = torch.nn.LayerNorm(in_dim)
         if slot_mask:
             self.boqs = torch.nn.ModuleList([
-                BoQWithProtoMask(in_dim, num_queries, num_clusters=8, nheads=in_dim//64) for _ in range(num_layers)])
+                BoQWithProtoMask(in_dim, num_queries, num_clusters=num_clusters, nheads=in_dim//64, eps=1e+3) for _ in range(num_layers)])
         else:
             self.boqs = torch.nn.ModuleList([
                 BoQBlock(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])
         
-        self.fc = torch.nn.Linear(num_layers*num_queries, row_dim)
+        self.fc = torch.nn.Linear(num_layers*num_queries, num_clusters)
         
     def forward(self, x, cls=None):
         # reduce input dimension using 3x3 conv when using ResNet
@@ -350,11 +372,15 @@ class BoQ(torch.nn.Module):
         attns = []
         masks = []
         queries = []
+        R = []
+        s = []
         for i in range(len(self.boqs)):
             if self.slot_mask:
-                x, out, attn, mask, q = self.boqs[i](x, cls)
+                x, out, attn, mask, q, r, si = self.boqs[i](x, cls)
                 masks.append(mask)
                 queries.append(q)
+                R.append(r)
+                s.append(si)
             else:
                 x, out, attn = self.boqs[i](x)
             outs.append(out)
@@ -365,4 +391,4 @@ class BoQ(torch.nn.Module):
         out = self.fc(out.permute(0, 2, 1))
         out = out.flatten(1)
         out = torch.nn.functional.normalize(out, p=2, dim=-1)
-        return out, attns, masks, queries
+        return out, attns, masks, queries, R, s

@@ -19,6 +19,76 @@ import io
 import PIL.Image
 from torchvision.transforms import ToTensor
 
+def plot_R_hat(writer, tag, R_hat, global_step):
+    # R_hat shape: (Q, Nc) 
+    Q, Nc = R_hat.shape
+    
+    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+    
+    R_sample = R_hat.detach().cpu().numpy()  # Shape: (Q, Nc)
+    
+    im = ax.imshow(R_sample, cmap='viridis', aspect='auto')
+    ax.set_title("R_hat Heatmap")
+    ax.set_xlabel("Nc Dimension")
+    ax.set_ylabel("Query Index")
+    plt.colorbar(im, ax=ax)
+    
+    fig.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    
+    image = PIL.Image.open(buf)
+    image_tensor = ToTensor()(image)
+    
+    writer.add_image(tag, image_tensor, global_step)
+    
+    plt.close(fig)
+
+def plot_similarity_matrix(writer, tag, similarity_matrix, global_step):
+    # similarity_matrix shape: (B, patch_size**2)
+    B, patch_size_squared = similarity_matrix.shape
+    patch_size = int(patch_size_squared ** 0.5)  # Calculate patch_size from patch_size**2
+    
+    # Select up to 4 samples to plot
+    sample_indices = [0, B//4, B//2, 3*B//4] if B >= 4 else list(range(B))
+    sample_indices = [idx for idx in sample_indices if idx < B]
+    
+    cols = 2
+    rows = 2
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 3))
+    axes = axes.flatten()  # Make it easier to index
+    
+    for i, sample_idx in enumerate(sample_indices):
+        # Reshape from (patch_size**2,) to (patch_size, patch_size)
+        sim_sample = similarity_matrix[sample_idx].detach().cpu().numpy().reshape(patch_size, patch_size)
+        
+        ax = axes[i]
+        im = ax.imshow(sim_sample, cmap='viridis', aspect='auto')
+        ax.set_title(f"Sample {sample_idx}")
+        ax.set_xlabel("Patch X")
+        ax.set_ylabel("Patch Y")
+        plt.colorbar(im, ax=ax)
+    
+    # Hide unused subplots
+    for i in range(len(sample_indices), len(axes)):
+        axes[i].axis('off')
+    
+    fig.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    
+    image = PIL.Image.open(buf)
+    image_tensor = ToTensor()(image)
+    
+    writer.add_image(tag, image_tensor, global_step)
+    
+    plt.close(fig)
+
 def plot_output_gates(writer, tag, out_gate_samples, global_step):
     # out_gate_samples shape: (N, Q, X) where N is batch size, Q is number of queries, X is feature dimension
     N, Q, X = out_gate_samples.shape
@@ -30,7 +100,7 @@ def plot_output_gates(writer, tag, out_gate_samples, global_step):
     cols = 2
     rows = 2
     
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 3))
     axes = axes.flatten()  # Make it easier to index
     
     for i, sample_idx in enumerate(sample_indices):
@@ -186,8 +256,8 @@ class BoQModel(L.LightningModule):
     
     def forward(self, x):
         x, cls = self.backbone(x)
-        x, attns, out_gate_samples, queries = self.aggregator(x, cls)
-        return x, attns, queries, out_gate_samples
+        x, attns, out_gate_samples, queries, R, s = self.aggregator(x, cls)
+        return x, attns, queries, out_gate_samples, R, s
 
     def query_diversity_loss(self, queries):
         # queries: [B, Q, C]
@@ -209,7 +279,7 @@ class BoQModel(L.LightningModule):
         labels = labels.flatten() # P*K
         
         # forward pass
-        descriptors, attentions, queries, out_gate_samples = self(images)
+        descriptors, attentions, queries, out_gate_samples, R, s = self(images)
         # queries = torch.cat(queries, dim=1)
         # compute loss
         loss = self.compute_loss(descriptors, labels)
@@ -247,7 +317,23 @@ class BoQModel(L.LightningModule):
                     out_gate_samples=out_gate_samples,
                     global_step=self.trainer.global_step
                 )
-            
+            if R is not None and s is not None:
+                # log the R_hat and slot masks
+                for i, r in enumerate(R):
+                    plot_R_hat(
+                        writer=self.logger.experiment,
+                        tag=f"R_hat/layer_{i+1}",
+                        R_hat=r,
+                        global_step=self.trainer.global_step
+                    )
+                for i, similar in enumerate(s):
+                    plot_similarity_matrix(
+                        writer=self.logger.experiment,
+                        tag=f"similarity_matrix/layer_{i+1}",
+                        similarity_matrix=similar,
+                        global_step=self.trainer.global_step
+                    )
+                    
 
         self.log("loss", loss, prog_bar=True, logger=True)
 
@@ -271,7 +357,7 @@ class BoQModel(L.LightningModule):
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         images, _ = batch
-        descriptors, _, _, _ = self(images)
+        descriptors, _, _, _, _, _ = self(images)
         descriptors = descriptors.detach().cpu()#.numpy()
         
         if dataloader_idx not in self.validation_outputs:

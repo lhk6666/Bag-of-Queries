@@ -33,7 +33,7 @@ class HyperParams:
         self.img_per_place: int = 4          # number of images per place
         self.max_epochs: int = 40
         self.warmup_epochs: int = 5         # number of linear warmup epochs (not iterations)
-        self.lr: float = 1e-4                # learning rate
+        self.lr: float = 2e-4                # learning rate
         self.weight_decay: float = 1e-4
         self.lr_mul: float = 0.1
         self.milestones: list = [5, 15, 25]

@@ -214,3 +214,80 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+    
+if __name__ == "__main__":
+    import cv2
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from PIL import Image
+    import torch.nn.functional as F
+    # 配置
+    image_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/data/val/Nordland/query/0000000.jpg"  # 修改为你的图片路径
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # 加载模型
+    # model = DinoV3(backbone_name="dinov3_vitb16", unfreeze_n_blocks=0)
+    model = DinoV2(backbone_name="dinov2_vitb14", unfreeze_n_blocks=0)
+    model.to(device)
+    model.eval()
+    
+    # 加载和预处理图片
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_resized = cv2.resize(image, (224, 224))
+    
+    # 转换为tensor并归一化
+    image_tensor = torch.from_numpy(image_resized).float().permute(2, 0, 1) / 255.0
+    # 标准化 (ImageNet标准)
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    image_tensor = (image_tensor - mean) / std
+    image_tensor = image_tensor.unsqueeze(0).to(device)
+    
+    # 前向传播
+    with torch.no_grad():
+        x, cls = model(image_tensor)
+    
+    # 计算余弦相似度
+    # x: [1, N, C], cls: [1, C]
+    cls_expanded = cls.unsqueeze(1)  # [1, 1, C]
+    
+    # 计算余弦相似度
+    similarity = F.cosine_similarity(x, cls_expanded, dim=2)  # [1, N]
+    similarity = similarity.squeeze(0).cpu().numpy()  # [N]
+    
+    # 将相似度重新整形为空间维度 (14x14 for 224x224 input with patch_size=16)
+    patch_size = model.patch_size
+    h_patches = w_patches = 224 // patch_size
+    similarity_map = similarity.reshape(h_patches, w_patches)
+    
+    # 可视化
+    plt.figure(figsize=(12, 5))
+    
+    # 原图 - 添加网格分割
+    plt.subplot(1, 2, 1)
+    plt.imshow(image_resized)
+    
+    # 添加网格线显示patch分割
+    for i in range(1, h_patches):
+        plt.axhline(y=i*patch_size-0.5, color='white', linestyle='-', linewidth=1, alpha=0.7)
+    for j in range(1, w_patches):
+        plt.axvline(x=j*patch_size-0.5, color='white', linestyle='-', linewidth=1, alpha=0.7)
+    
+    plt.title(f"Original Image (224x224) with {patch_size}x{patch_size} Patches")
+    plt.axis('off')
+    
+    # 热力图
+    plt.subplot(1, 2, 2)
+    sns.heatmap(similarity_map, cmap='viridis', annot=False, cbar=True)
+    plt.title("CLS-Patch Cosine Similarity Heatmap")
+    
+    plt.tight_layout()
+    plt.show()
+    
+    print(f"Image resized to: 224x224")
+    print(f"Patch size: {patch_size}x{patch_size}")
+    print(f"Number of patches: {h_patches}x{w_patches}")
+    print(f"Similarity map shape: {similarity_map.shape}")
+    print(f"Similarity range: [{similarity_map.min():.3f}, {similarity_map.max():.3f}]")
