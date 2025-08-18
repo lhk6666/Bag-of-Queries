@@ -20,30 +20,35 @@ import PIL.Image
 from torchvision.transforms import ToTensor
 
 def plot_output_gates(writer, tag, out_gate_samples, global_step):
-    # out_gate_samples shape: (N, Q) where N is batch size and Q is number of queries
-    N, Q = out_gate_samples.shape
+    # out_gate_samples shape: (N, Q, X) where N is batch size, Q is number of queries, X is feature dimension
+    N, Q, X = out_gate_samples.shape
     
     # Select up to 4 samples to plot
     sample_indices = [0, N//4, N//2, 3*N//4] if N >= 4 else list(range(N))
+    sample_indices = [idx for idx in sample_indices if idx < N]
     
-    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+    cols = 2
+    rows = 2
     
-    # Create x-axis (query indices)
-    x = range(Q)
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4))
+    axes = axes.flatten()  # Make it easier to index
     
-    # Plot waveforms for selected samples
     for i, sample_idx in enumerate(sample_indices):
-        if sample_idx < N:
-            gate_values = out_gate_samples[sample_idx].detach().cpu().numpy()
-            ax.plot(x, gate_values, label=f'Sample {sample_idx}', linewidth=2, alpha=0.7)
+        gate_sample = out_gate_samples[sample_idx].detach().cpu().numpy()  # Shape: (Q, X)
+        
+        ax = axes[i]
+        im = ax.imshow(gate_sample, cmap='viridis', aspect='auto')
+        ax.set_title(f"Sample {sample_idx}")
+        ax.set_xlabel("Patch Index")
+        ax.set_ylabel("Query Index")
+        ax.axis('off')
     
-    ax.set_xlabel('Query Index')
-    ax.set_ylabel('Gate Value')
-    ax.set_title('Output Gate Values Across Queries')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    # Hide unused subplots
+    for i in range(len(sample_indices), len(axes)):
+        axes[i].axis('off')
     
     fig.tight_layout()
+    fig.colorbar(im, ax=axes, orientation='horizontal', fraction=.1)
     
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
