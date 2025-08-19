@@ -237,7 +237,7 @@ class QueryClusterRouter(nn.Module):
 
     @torch.no_grad()
     def reset_router_bias(self, strength: float = 6.0, neg: float = -2.0,
-                          jitter: float = 0.1, shuffle: bool = False, seed: int | None = None):
+                          jitter: float = 0, shuffle: bool = False, seed: int | None = None):
         """
         用分工偏置初始化 logits：
           - 每个 query 先被“指派”到一个 cluster（轮转分配）

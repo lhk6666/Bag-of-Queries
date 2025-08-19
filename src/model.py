@@ -277,7 +277,7 @@ class BoQModel(L.LightningModule):
         for name, p in self.named_parameters():
             if p.grad is None:
                 continue
-            if any(k in name for k in ["router.logits", "cross_attn.in_proj_weight"]):
+            if any(k in name for k in ["router.log_sigma", "cross_attn.in_proj_weight"]):
                 writer.add_histogram(f"grads/{name}", p.grad, self.global_step)
                 writer.add_scalar(f"grads_mean/{name}", p.grad.mean(), self.global_step)
                 writer.add_scalar(f"grads_norm/{name}", p.grad.data.norm(2), self.global_step)
@@ -293,22 +293,6 @@ class BoQModel(L.LightningModule):
         mined_pairs = self.ms_miner(descriptors, labels)
         loss =  self.ms_loss(descriptors, labels, mined_pairs)
         return loss
-    
-    # def compute_attn_mask_loss(self, attentions, attn_masks, B):
-    #     attentions = torch.cat(attentions, dim=0)  # [B, L, S] or [B, H, L, S]
-    #     attn_masks = torch.cat(attn_masks, dim=0) if attn_masks is not None else None # [B*H, L, S]
-    #     attn_masks = attn_masks.view(B, -1, attn_masks.shape[-2], attn_masks.shape[-1]).mean(dim=1) if attn_masks is not None else None  # [B, L, S]
-    #     if attentions.ndim == 3:
-    #         attentions = attentions.unsqueeze(1)  # [B, 1, L, S]
-    #     A = attentions.mean(dim=1)                                   # [B, Q, Nx]
-    #     A = A.norm(dim=-1, keepdim=True)  # Normalize A to have unit norm
-    #     T = attn_masks.norm(dim=-1, keepdim=True) if attn_masks is not None else None  # [B, Q, Nx]
-    #     if T is not None:
-    #         # 3) KL(A || T) —— 把 A 拉向 T（T 是你由 Router 得到的目标分布）
-            
-    #         return kl
-    #     else:
-    #         return 0
     
     def forward(self, x):
         x, cls = self.backbone(x)
