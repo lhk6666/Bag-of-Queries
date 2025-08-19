@@ -49,48 +49,120 @@ import torch.nn.functional as F
 # ---------- Step 1: CLS -> Prototypes (in K-space) ----------
 class CLSPrototypes(nn.Module):
     """
-    用 CLS 生成 num_clusters 个 K 空间原型（每图一套），全可微。
-    C = normalize( Linear(CLS_in_K) ), 然后对 Kx 做 soft assignment 得到 P。
+    不加额外loss的防塌版本：
+      - 可选 QR 正交化 / soft-orth
+      - 全局码书门控融合
+      - P 的列均衡(Sinkhorn)或均匀混合
+      - 温度自适应
     """
-    def __init__(self, dim: int, num_clusters: int, scale_init: float = 20.0, repel_reg: float = 0.0):
+    def __init__(self, dim:int, num_clusters:int,
+                 use_qr_ortho: bool = True,      # True: QR 正交；False: soft-orth
+                 global_codebook: bool = True,   # 是否引入全局码书
+                 mix_uniform_eps: float = 0.03,  # P ← (1-ε)P+ε/N
+                 sinkhorn_iters: int = 0,        # >0 则做列均衡
+                 target_logit_std: float = 0.5,  # 目标 logits 方差
+                 per_head: int = 0               # >0 则多头，每头簇数=per_head，头数=N//per_head
+                 ):
         super().__init__()
-        self.num_clusters = num_clusters
-        # 将 K 空间中的 CLS 映射到 N 个原型（每个 D 维）
+        self.N, self.D = num_clusters, dim
+        self.use_qr_ortho = use_qr_ortho
+        self.global_codebook = global_codebook
+        self.mix_uniform_eps = mix_uniform_eps
+        self.sinkhorn_iters = sinkhorn_iters
+        self.target_logit_std = target_logit_std
+
+        # (可选) 多头
+        if per_head and num_clusters % per_head == 0:
+            self.num_heads = num_clusters // per_head
+            self.per_head = per_head
+        else:
+            self.num_heads = 1
+            self.per_head = num_clusters
+
         self.cls_to_proto = nn.Linear(dim, num_clusters * dim, bias=True)
         nn.init.xavier_uniform_(self.cls_to_proto.weight, gain=0.01)
         nn.init.zeros_(self.cls_to_proto.bias)
-        # 可学习的尺度，相当于温度的倒数
-        self.log_scale = nn.Parameter(torch.log(torch.tensor(scale_init)))
-        self.repel_reg = float(repel_reg)
+
+        # 门控：控制 全局码书 vs 局部原型 的融合
+        if global_codebook:
+            self.G = nn.Parameter(F.normalize(torch.randn(num_clusters, dim), dim=-1))
+            self.gate = nn.Sequential(
+                nn.Linear(dim, num_clusters), nn.Sigmoid()
+            )
+
+    @staticmethod
+    def _batch_qr_orthonormalize(C):  # C:[B,N,D], N<=D
+        # 对每个样本做 QR，使行（N个向量）正交
+        # 实现：对转置做QR，再转回
+        # Q_col:[B,D,N] → 转回 [B,N,D]
+        Q_col, _ = torch.linalg.qr(C.transpose(1,2), mode='reduced')  # [B,D,N]
+        C_ortho = Q_col.transpose(1,2)  # [B,N,D]
+        return F.normalize(C_ortho, dim=-1)
+
+    @staticmethod
+    def _soft_orth_step(C, alpha=0.5):  # C:[B,N,D], 任意 N,D
+        # 一步的去相关修正：C <- C - α ( (C C^T - I) C )
+        B,N,D = C.shape
+        I = torch.eye(N, device=C.device).unsqueeze(0)
+        G = torch.matmul(C, C.transpose(1,2)) - I               # [B,N,N]
+        C = C - alpha * torch.matmul(G, C)                       # [B,N,D]
+        return F.normalize(C, dim=-1)
+
+    @staticmethod
+    def _sinkhorn(P, iters:int):
+        # P:[B,Nx,N]，行和=1; 让列和≈均衡
+        B,Nx,N = P.shape
+        col_target = float(Nx)/float(N)
+        for _ in range(iters):
+            P = P / (P.sum(dim=2, keepdim=True) + 1e-6)         # 行归一
+            col_sum = P.sum(dim=1, keepdim=True) + 1e-6         # 列和
+            P = P * (col_target / col_sum)
+        return P
 
     def forward(self, Kx: torch.Tensor, Kcls: torch.Tensor):
         """
-        Kx:   [B, Nx, D]  (L2-normalized)
-        Kcls: [B, 1,  D]  (L2-normalized)
-        返回:
-          P:    [B, Nx, N]   patch→cluster 软分配
-          C:    [B, N,  D]   原型（K 空间）
-          loss: 原型分离正则（可加到总loss）
+        Kx:   [B, Nx, D] (L2-normalized)
+        Kcls: [B, 1,  D] (L2-normalized)
+        返回: P:[B,Nx,N], C:[B,N,D]
         """
-        B, Nx, D = Kx.shape
-        # 由 CLS 生成原型（每图一套）
-        C = self.cls_to_proto(Kcls.squeeze(1)).view(B, self.num_clusters, D)  # [B,N,D]
-        C = F.normalize(C, dim=-1)
+        B,Nx,D = Kx.shape
+        cls = Kcls.squeeze(1)                                    # [B,D]
 
-        scale = torch.clamp(self.log_scale.exp(), min=1.0, max=100.0)
-        # logits: [B, Nx, N] = <Kx, C>*scale
-        logits = scale * torch.einsum('bid,bnd->bin', Kx, C)
+        # 1) 由 CLS 生成局部原型
+        C_loc = self.cls_to_proto(cls).view(B, self.N, D)        # [B,N,D]
+        C_loc = F.normalize(C_loc, dim=-1)
+
+        # 2) 正交化（零loss防塌的关键）
+        if self.use_qr_ortho and self.N <= D:
+            C_loc = self._batch_qr_orthonormalize(C_loc)         # 真·正交
+        else:
+            C_loc = self._soft_orth_step(C_loc, alpha=0.5)       # 近似正交一步
+
+        # 3) 与全局码书门控融合（提升稳态 & 跨图一致性）
+        if self.global_codebook:
+            G = self.G.unsqueeze(0).expand(B, -1, -1)            # [B,N,D]
+            gate = self.gate(cls).unsqueeze(-1)                  # [B,N,1] in [0,1]
+            C = F.normalize(gate * C_loc + (1 - gate) * G, dim=-1)
+        else:
+            C = C_loc
+
+        # 4) 计算 logits，并做温度自适应（目标方差匹配）
+        logits_raw = torch.einsum('bid,bnd->bin', Kx, C)         # <Kx,C>
+        # 调整缩放使得 logits 的 std 接近 target
+        std = logits_raw.detach().std(dim=(1,2), keepdim=True).clamp(min=1e-3)
+        scale = (self.target_logit_std / std).clamp(0.5, 5.0)    # 防极端
+        logits = scale * logits_raw
+
+        # 5) 软分配 + 均衡/熵下界
         P = torch.softmax(logits, dim=-1)
+        if self.sinkhorn_iters > 0:
+            P = self._sinkhorn(P, self.sinkhorn_iters)
+        if self.mix_uniform_eps > 0:
+            eps = self.mix_uniform_eps
+            P = (1 - eps) * P + eps * (1.0 / self.N)
 
-        # 原型分离正则（可选）：惩罚不同原型夹角过小
-        loss = torch.tensor(0.0, device=Kx.device)
-        if self.repel_reg > 0:
-            # 余弦相似的平方和（去对角）
-            cos = torch.einsum('bnd,bmd->bnm', C, C)  # [B,N,N]
-            eye = torch.eye(self.num_clusters, device=Kx.device).unsqueeze(0)
-            off = (cos - eye) ** 2
-            loss = self.repel_reg * off.sum(dim=(1,2)).mean()
-        return P, C, loss
+        return P, C
+
     
 class CLSBinner(nn.Module):
     """
@@ -178,7 +250,8 @@ class QueryClusterRouter(nn.Module):
             torch.manual_seed(seed)
 
         # 轮转分配：q -> (q mod N)
-        assign = torch.arange(Q) % N
+        # assign = torch.arange(Q) % N
+        assign = torch.arange(Q) // (Q // N)  # 每个 query 分配到一个 cluster
         if shuffle:
             perm = torch.randperm(Q)
             assign = assign[perm]  # 打乱，让每次运行分配顺序不同
@@ -194,8 +267,8 @@ class QueryClusterRouter(nn.Module):
 
     def forward(self, P: torch.Tensor):
         Ttemp = torch.clamp(self.log_temp.exp(), min=0.2, max=10.0)
-        # R_hat = F.softmax(self.logits / Ttemp, dim=-1)  # [Q,N]
-        R_hat = F.sigmoid(self.logits / Ttemp)  # [Q,N]
+        R_hat = F.softmax(self.logits / Ttemp, dim=-1)  # [Q,N]
+        # R_hat = F.sigmoid(self.logits / Ttemp)  # [Q,N]
         Pt = P.transpose(1, 2).contiguous()             # [B,N,Nx]
         T = torch.einsum('qn,bnk->bqk', R_hat, Pt)      # [B,Q,Nx]
         T = T / (T.sum(dim=-1, keepdim=True) + 1e-6)
@@ -214,7 +287,7 @@ class BoQWithProtoMask(nn.Module):
     只需指定：num_clusters (N) 与 num_queries (Q)。
     """
     def __init__(self, dim: int, num_queries: int, num_clusters: int, nheads: int = 8,
-                 alpha_init: float = 0.4, eps: float = 1e+2,
+                 alpha_init: float = 0.4, eps: float = 5e+2,
                  proto_scale_init: float = 20.0, proto_repel: float = 0.0,
                  router_temp_init: float = 1.0,
                  kl_weight: float = 0.0, div_weight: float = 0.0, mask_gain: float = 5.0):
@@ -223,8 +296,9 @@ class BoQWithProtoMask(nn.Module):
         self.num_queries = num_queries
         self.num_clusters = num_clusters
         self.nheads = nheads
-        self.eps = eps
         self.mask_gain = mask_gain
+
+        self.eps = nn.Parameter(torch.tensor(eps, dtype=torch.float32))  # 防止 log(0)
 
         # Queries & attentions
         self.queries = nn.Parameter(torch.randn(1, num_queries, dim))
@@ -234,7 +308,7 @@ class BoQWithProtoMask(nn.Module):
         self.norm_out = nn.LayerNorm(dim)
 
         # Step 1: CLS->Prototypes (in K-space)
-        # self.protos = CLSPrototypes(dim, num_clusters, scale_init=proto_scale_init, repel_reg=proto_repel)
+        # self.protos = CLSPrototypes(dim, num_clusters)
         self.binners = CLSBinner(num_clusters, sigma=0.05, use_sinkhorn=True, sinkhorn_iters=5)
 
         # Step 2: Query->Cluster Router
@@ -261,6 +335,32 @@ class BoQWithProtoMask(nn.Module):
         Kx = F.linear(x, Wk, bk)
         Kx = F.normalize(Kx, dim=-1)
         return Kx
+    
+    def masked_cross_attn(self, q, x, mha, attn_bias):  # attn_bias: [B,H,Q,Nx]
+        W = mha.in_proj_weight; b = mha.in_proj_bias; D = mha.embed_dim
+        Wq, Wk, Wv = W[:D,:], W[D:2*D,:], W[2*D:,:]
+        bq = b[:D] if b is not None else None
+        bk = b[D:2*D] if b is not None else None
+        bv = b[2*D:] if b is not None else None
+        Wo, bo = mha.out_proj.weight, mha.out_proj.bias
+        H = mha.num_heads; d = D // H
+
+        q_proj = F.linear(q, Wq, bq)               # [B,Q,D]
+        k_proj = F.linear(x, Wk, bk)               # [B,Nx,D]
+        v_proj = F.linear(x, Wv, bv)               # [B,Nx,D]
+
+        def split(z):  # [B,L,D] -> [B,H,L,d]
+            B,L,_ = z.shape
+            return z.view(B, L, H, d).transpose(1, 2).contiguous()
+
+        qh, kh, vh = split(q_proj), split(k_proj), split(v_proj)
+        scores = torch.einsum('bhqd,bhkd->bhqk', qh, kh) / (d ** 0.5)
+        scores = scores + attn_bias                # ★ 可微的偏置
+        w = torch.softmax(scores, dim=-1)          # [B,H,Q,Nx]
+        oh = torch.einsum('bhqk,bhkd->bhqd', w, vh)
+        o  = oh.transpose(1, 2).reshape(q.size(0), q.size(1), D)
+        o  = F.linear(o, Wo, bo)
+        return o, w
 
     def forward(self, x: torch.Tensor, cls: torch.Tensor):
         """
@@ -286,7 +386,7 @@ class BoQWithProtoMask(nn.Module):
         # Kcls = self._project_K(cls)                        # [B,1, D]
 
         # ---- Step 1: CLS->Prototypes → P ----
-        # P, C, proto_loss = self.protos(x, cls)           # P: [B,Nx,N], C: [B,N,D]
+        # P, C = self.protos(x, cls)           # P: [B,Nx,N], C: [B,N,D]
         P, s = self.binners(x, cls)                        # P: [B,Nx,N], s: [B,Nx]
 
         # ---- Step 2: Router(P) → T ----
@@ -296,17 +396,18 @@ class BoQWithProtoMask(nn.Module):
         alpha = float(self._alpha.item())
         if alpha > 0:
             log_bias = alpha * torch.log(T * self.eps)     # [B,Q,Nx]
-            attn_mask = self.mask_gain * log_bias.unsqueeze(1).repeat(1, H, 1, 1).reshape(B * H, Q, Nx)
-            attn_mask = torch.clamp(attn_mask, min=-10.0, max=10.0)  # 限制数值范围
+            attn_mask = self.mask_gain * log_bias.unsqueeze(1).repeat(1, H, 1, 1)
+            # attn_mask = torch.clamp(attn_mask, min=-5.0, max=5.0)  # 限制数值范围
         else:
             attn_mask = None
 
-        out, attn = self.cross_attn(
-            q, x, x,
-            need_weights=True,
-            average_attn_weights=True,
-            attn_mask=attn_mask
-        )                                                  # attn: [B,H,Q,Nx]
+        # out, attn = self.cross_attn(
+        #     q, x, x,
+        #     need_weights=True,
+        #     average_attn_weights=True,
+        #     attn_mask=attn_mask
+        # )                                                  # attn: [B,H,Q,Nx]
+        out, attn = self.masked_cross_attn(q, x, self.cross_attn, attn_mask)  # [B,Q,D], [B,H,Q,Nx]
         out = self.norm_out(out)
 
         # # ---- Optional losses ----
@@ -346,7 +447,7 @@ class BoQWithProtoMask(nn.Module):
 
 
 class BoQ(torch.nn.Module):
-    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_clusters=16, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False):
+    def __init__(self, in_channels=1024, proj_channels=512, num_queries=32, num_clusters=8, num_layers=2, row_dim=32, slot_mask=True, mlp=False, hidden_layer=False):
         super().__init__()
         # self.proj_c = torch.nn.Conv2d(in_channels, proj_channels, kernel_size=3, padding=1)
         
@@ -355,7 +456,7 @@ class BoQ(torch.nn.Module):
         # self.norm_input = torch.nn.LayerNorm(in_dim)
         if slot_mask:
             self.boqs = torch.nn.ModuleList([
-                BoQWithProtoMask(in_dim, num_queries, num_clusters=num_clusters, nheads=in_dim//64, eps=1e+3) for _ in range(num_layers)])
+                BoQWithProtoMask(in_dim, num_queries, num_clusters=num_clusters, nheads=in_dim//64) for _ in range(num_layers)])
         else:
             self.boqs = torch.nn.ModuleList([
                 BoQBlock(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])

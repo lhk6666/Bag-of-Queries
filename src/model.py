@@ -89,10 +89,14 @@ def plot_similarity_matrix(writer, tag, similarity_matrix, global_step):
     
     plt.close(fig)
 
-def plot_output_gates(writer, tag, out_gate_samples, global_step):
-    # out_gate_samples shape: (N, Q, X) where N is batch size, Q is number of queries, X is feature dimension
-    N, Q, X = out_gate_samples.shape
-    
+def plot_output_gates(writer, tag, attn_masks, global_step):
+    # attn_masks shape: (N, Q, X) where N is batch size, Q is number of queries, X is feature dimension
+    if attn_masks.ndim == 3:
+        N, Q, X = attn_masks.shape
+    elif attn_masks.ndim == 4:
+        attn_masks = attn_masks.mean(dim=1)  # Average over heads if needed
+        N, Q, X = attn_masks.shape
+
     # Select up to 4 samples to plot
     sample_indices = [0, N//4, N//2, 3*N//4] if N >= 4 else list(range(N))
     sample_indices = [idx for idx in sample_indices if idx < N]
@@ -104,7 +108,7 @@ def plot_output_gates(writer, tag, out_gate_samples, global_step):
     axes = axes.flatten()  # Make it easier to index
     
     for i, sample_idx in enumerate(sample_indices):
-        gate_sample = out_gate_samples[sample_idx].detach().cpu().numpy()  # Shape: (Q, X)
+        gate_sample = attn_masks[sample_idx].detach().cpu().numpy()  # Shape: (Q, X)
         
         ax = axes[i]
         im = ax.imshow(gate_sample, cmap='viridis', aspect='auto')
@@ -146,16 +150,21 @@ def plot_attention_maps(writer, tag, attention_weights, global_step):
     for i, sample_idx in enumerate(sample_indices):
         if sample_idx < batch_size:
             attn_sample = attention_weights[sample_idx].detach().cpu()  # Shape: (H, L, S) or (L, S)
-            
+            if attn_sample.ndim == 3:
+                attn_sample = attn_sample.mean(dim=0)
             ax = axes[i]
             im = ax.imshow(attn_sample, cmap='viridis', aspect='auto')
             ax.set_title(f"Sample {sample_idx}")
             ax.set_xlabel("Key Sequence")
             ax.set_ylabel("Query Sequence")
-            ax.axis('off')
+            fig.colorbar(im, ax=ax, orientation='horizontal', fraction=.1)
+    
+    # Hide unused subplots
+    for i in range(len(sample_indices), len(axes)):
+        axes[i].axis('off')
 
     fig.tight_layout()
-    fig.colorbar(im, ax=axes, orientation='horizontal', fraction=.1)
+    # fig.colorbar(im, ax=axes, orientation='horizontal', fraction=.1)
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
@@ -219,6 +228,7 @@ class BoQModel(L.LightningModule):
         self.warmup_epochs = warmup_epochs
         self.milestones = milestones
         self.silent = silent # disable console output
+        self.grad_log_interval = 100
         
         # init loss function and miner
         self.ms_loss = losses.MultiSimilarityLoss(alpha=1, beta=50, base=0.)
@@ -247,6 +257,36 @@ class BoQModel(L.LightningModule):
 
         optimizer.step(closure=optimizer_closure)
         self.log('_LR', optimizer.param_groups[-1]['lr'], prog_bar=False, logger=True)
+
+    def on_after_backward(self):
+        # 只在指定的 step 记录
+        if (self.global_step % self.grad_log_interval) != 0:
+            return
+        writer = self.logger.experiment  # TensorBoard SummaryWriter
+
+        # 1) 全局梯度范数（总览）
+        total_norm_sq = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm_sq += param_norm.item() ** 2
+        total_grad_norm = total_norm_sq ** 0.5
+        writer.add_scalar("grads/total_grad_norm", total_grad_norm, self.global_step)
+
+        # 2) 关键参数的梯度直方图/均值（示例：Router 的 sigma、Shift）
+        for name, p in self.named_parameters():
+            if p.grad is None:
+                continue
+            if any(k in name for k in ["router.logits", "cross_attn.in_proj_weight"]):
+                writer.add_histogram(f"grads/{name}", p.grad, self.global_step)
+                writer.add_scalar(f"grads_mean/{name}", p.grad.mean(), self.global_step)
+                writer.add_scalar(f"grads_norm/{name}", p.grad.data.norm(2), self.global_step)
+
+        # 3) 可选：检测 NaN/Inf
+        has_nan = any([torch.isnan(p.grad).any().item() for p in self.parameters() if p.grad is not None])
+        writer.add_scalar("grads/has_nan", float(has_nan), self.global_step)
+
+
     
     @torch.compiler.disable()
     def compute_loss(self, descriptors, labels):
@@ -254,22 +294,26 @@ class BoQModel(L.LightningModule):
         loss =  self.ms_loss(descriptors, labels, mined_pairs)
         return loss
     
+    # def compute_attn_mask_loss(self, attentions, attn_masks, B):
+    #     attentions = torch.cat(attentions, dim=0)  # [B, L, S] or [B, H, L, S]
+    #     attn_masks = torch.cat(attn_masks, dim=0) if attn_masks is not None else None # [B*H, L, S]
+    #     attn_masks = attn_masks.view(B, -1, attn_masks.shape[-2], attn_masks.shape[-1]).mean(dim=1) if attn_masks is not None else None  # [B, L, S]
+    #     if attentions.ndim == 3:
+    #         attentions = attentions.unsqueeze(1)  # [B, 1, L, S]
+    #     A = attentions.mean(dim=1)                                   # [B, Q, Nx]
+    #     A = A.norm(dim=-1, keepdim=True)  # Normalize A to have unit norm
+    #     T = attn_masks.norm(dim=-1, keepdim=True) if attn_masks is not None else None  # [B, Q, Nx]
+    #     if T is not None:
+    #         # 3) KL(A || T) —— 把 A 拉向 T（T 是你由 Router 得到的目标分布）
+            
+    #         return kl
+    #     else:
+    #         return 0
+    
     def forward(self, x):
         x, cls = self.backbone(x)
-        x, attns, out_gate_samples, queries, R, s = self.aggregator(x, cls)
-        return x, attns, queries, out_gate_samples, R, s
-
-    def query_diversity_loss(self, queries):
-        # queries: [B, Q, C]
-        B, Q, _ = queries.shape
-        loss = 0.0
-
-        q = torch.nn.functional.normalize(queries, p=2, dim=2)  # [B, Q, C]
-        gram = torch.matmul(q, q.transpose(1, 2))  # [B, Q, Q]
-        I = torch.eye(Q, device=gram.device, dtype=gram.dtype)
-        I = I[None, :, :].repeat(B, 1, 1)  # [B, Q, Q]
-        loss = ((gram - I) ** 2).mean()
-        return loss 
+        x, attns, attn_masks, queries, R, s = self.aggregator(x, cls)
+        return x, attns, queries, attn_masks, R, s
 
     def training_step(self, batch, batch_idx):
         images, labels = batch
@@ -279,12 +323,14 @@ class BoQModel(L.LightningModule):
         labels = labels.flatten() # P*K
         
         # forward pass
-        descriptors, attentions, queries, out_gate_samples, R, s = self(images)
+        descriptors, attentions, queries, attn_masks, R, s = self(images)
+        B, _ = descriptors.shape  
         # queries = torch.cat(queries, dim=1)
         # compute loss
         loss = self.compute_loss(descriptors, labels)
+        # kl_loss = self.compute_attn_mask_loss(attentions, attn_masks, B)
         # diversity = self.query_diversity_loss(queries[0])
-        if self.trainer.global_step % 100 == 0 and not self.silent:
+        if self.trainer.global_step % self.grad_log_interval == 0 and not self.silent:
             # log attention maps for the first batch
             if isinstance(attentions, (list, tuple)):
                 for i, attn_tensor in enumerate(attentions):
@@ -309,12 +355,12 @@ class BoQModel(L.LightningModule):
                     queries=query_tensor[0],
                     global_step=self.trainer.global_step
                 )
-            if out_gate_samples is not None and len(out_gate_samples) > 0:
-                out_gate_samples = torch.cat(out_gate_samples, dim=0).squeeze(-1)  # Stack to create a single tensor
+            if attn_masks is not None and len(attn_masks) > 0:
+                attn_masks = torch.cat(attn_masks, dim=0).squeeze(-1)  # Stack to create a single tensor
                 plot_output_gates(
                     writer=self.logger.experiment,
                     tag="output_gates",
-                    out_gate_samples=out_gate_samples,
+                    attn_masks=attn_masks,
                     global_step=self.trainer.global_step
                 )
             if R is not None and s is not None:
@@ -327,18 +373,19 @@ class BoQModel(L.LightningModule):
                         global_step=self.trainer.global_step
                     )
                 for i, similar in enumerate(s):
-                    plot_similarity_matrix(
-                        writer=self.logger.experiment,
-                        tag=f"similarity_matrix/layer_{i+1}",
-                        similarity_matrix=similar,
-                        global_step=self.trainer.global_step
-                    )
+                    if similar is not None:
+                        plot_similarity_matrix(
+                            writer=self.logger.experiment,
+                            tag=f"similarity_matrix/layer_{i+1}",
+                            similarity_matrix=similar,
+                            global_step=self.trainer.global_step
+                        )
                     
 
         self.log("loss", loss, prog_bar=True, logger=True)
-
-        return loss
-
+        # self.log("kl_loss", kl_loss, prog_bar=True, logger=True)
+        return loss 
+    
     def on_train_epoch_end(self):
         # reload the dataframes to shuffle in-city
         # this is faster than reloading the entire dataloader
