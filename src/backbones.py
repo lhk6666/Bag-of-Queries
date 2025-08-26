@@ -223,7 +223,7 @@ if __name__ == "__main__":
     from PIL import Image
     import torch.nn.functional as F
     # 配置
-    image_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/data/val/Nordland/query/0000000.jpg"  # 修改为你的图片路径
+    image_path = "/home/dragon_llm/daikin/daikin_ws/src/boq/data/val/Nordland/query/0002677.jpg"  # 修改为你的图片路径
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # 加载模型

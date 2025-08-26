@@ -277,7 +277,7 @@ class BoQModel(L.LightningModule):
         for name, p in self.named_parameters():
             if p.grad is None:
                 continue
-            if any(k in name for k in ["router.log_sigma", "cross_attn.in_proj_weight"]):
+            if any(k in name for k in ["router.logits", "cross_attn.in_proj_weight"]):
                 writer.add_histogram(f"grads/{name}", p.grad, self.global_step)
                 writer.add_scalar(f"grads_mean/{name}", p.grad.mean(), self.global_step)
                 writer.add_scalar(f"grads_norm/{name}", p.grad.data.norm(2), self.global_step)
@@ -340,7 +340,9 @@ class BoQModel(L.LightningModule):
                     global_step=self.trainer.global_step
                 )
             if attn_masks is not None and len(attn_masks) > 0:
-                attn_masks = torch.cat(attn_masks, dim=0).squeeze(-1)  # Stack to create a single tensor
+                # Move each mask to CPU first, then concatenate to avoid GPU memory issues
+                attn_masks_cpu = [mask.squeeze(-1).detach().cpu() for mask in attn_masks]
+                attn_masks = torch.cat(attn_masks_cpu, dim=0)
                 plot_output_gates(
                     writer=self.logger.experiment,
                     tag="output_gates",

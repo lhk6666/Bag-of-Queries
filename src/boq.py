@@ -237,7 +237,7 @@ class QueryClusterRouter(nn.Module):
 
     @torch.no_grad()
     def reset_router_bias(self, strength: float = 6.0, neg: float = -2.0,
-                          jitter: float = 0, shuffle: bool = False, seed: int | None = None):
+                          jitter: float = 0.1, shuffle: bool = False, seed: int | None = None):
         """
         用分工偏置初始化 logits：
           - 每个 query 先被“指派”到一个 cluster（轮转分配）
@@ -288,9 +288,8 @@ class BoQWithProtoMask(nn.Module):
     """
     def __init__(self, dim: int, num_queries: int, num_clusters: int, nheads: int = 8,
                  alpha_init: float = 0.4, eps: float = 5e+2,
-                 proto_scale_init: float = 20.0, proto_repel: float = 0.0,
                  router_temp_init: float = 1.0,
-                 kl_weight: float = 0.0, div_weight: float = 0.0, mask_gain: float = 5.0):
+                 mask_gain: float = 5.0):
         super().__init__()
         self.dim = dim
         self.num_queries = num_queries
@@ -317,9 +316,6 @@ class BoQWithProtoMask(nn.Module):
         # Step 3: mask 混合强度 α（可退火）
         self.register_buffer("_alpha", torch.tensor(alpha_init, dtype=torch.float32))
 
-        # 可选训练项
-        self.kl_weight = float(kl_weight)   # KL(A || T)
-        self.div_weight = float(div_weight) # diversity on R
 
     def set_alpha(self, alpha: float):
         alpha = max(0.0, min(1.0, float(alpha)))
@@ -442,7 +438,7 @@ class BoQWithProtoMask(nn.Module):
         #     attn=attn.detach()
         # )
 
-        return x, out, attn.detach(), attn_mask, q, R_hat, s
+        return x, out, attn.detach(), attn_mask.detach(), q.detach(), R_hat.detach(), s.detach()
 
 
 
@@ -460,9 +456,9 @@ class BoQ(torch.nn.Module):
         else:
             self.boqs = torch.nn.ModuleList([
                 BoQBlock(in_dim, num_queries, nheads=in_dim//64) for _ in range(num_layers)])
-        
-        self.fc = torch.nn.Linear(num_layers*num_queries, num_clusters)
-        
+
+        self.fc = torch.nn.Linear(num_layers*num_queries, num_layers * num_clusters)
+
     def forward(self, x, cls=None):
         # reduce input dimension using 3x3 conv when using ResNet
         # x = self.proj_c(x)
