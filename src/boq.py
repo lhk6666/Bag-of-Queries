@@ -175,8 +175,8 @@ class CLSBinner(nn.Module):
         super().__init__()
         self.n_bins = n_bins
         # 初始化中心在 [-1,1] 上平均分布
-        self.alpha = nn.Parameter(torch.tensor(0.4))  # learnable min
-        self.beta  = nn.Parameter(torch.tensor(0.8))   # learnable max
+        self.alpha = nn.Parameter(torch.tensor(0.0))  # learnable min
+        self.beta  = nn.Parameter(torch.tensor(1.0))   # learnable max
         base = torch.linspace(0, 1, steps=n_bins, device=self.alpha.device)
         centers = self.alpha + (self.beta - self.alpha) * base  # [n_bins]
         self.mu = nn.Parameter(centers)  # [n_bins]
@@ -220,7 +220,6 @@ class CLSBinner(nn.Module):
         # 3) 可选：Sinkhorn 让每个簇拿到接近 Nx/N 的质量（仍可微）
         if self.use_sinkhorn:
             P = self._sinkhorn(P, self.sinkhorn_iters)
-
         return P, s
 
 
@@ -287,9 +286,9 @@ class BoQWithProtoMask(nn.Module):
     只需指定：num_clusters (N) 与 num_queries (Q)。
     """
     def __init__(self, dim: int, num_queries: int, num_clusters: int, nheads: int = 8,
-                 alpha_init: float = 0.4, eps: float = 5e+2,
+                 alpha_init: float = 0.4, eps: float = 1e-6,
                  router_temp_init: float = 1.0,
-                 mask_gain: float = 5.0):
+                 mask_gain: float = 1.0):
         super().__init__()
         self.dim = dim
         self.num_queries = num_queries
@@ -308,7 +307,7 @@ class BoQWithProtoMask(nn.Module):
 
         # Step 1: CLS->Prototypes (in K-space)
         # self.protos = CLSPrototypes(dim, num_clusters)
-        self.binners = CLSBinner(num_clusters, sigma=0.05, use_sinkhorn=True, sinkhorn_iters=5)
+        self.binners = CLSBinner(num_clusters, sigma=0.05, use_sinkhorn=False, sinkhorn_iters=5)
 
         # Step 2: Query->Cluster Router
         self.router = QueryClusterRouter(num_queries, num_clusters, temp_init=router_temp_init)
@@ -351,6 +350,7 @@ class BoQWithProtoMask(nn.Module):
 
         qh, kh, vh = split(q_proj), split(k_proj), split(v_proj)
         scores = torch.einsum('bhqd,bhkd->bhqk', qh, kh) / (d ** 0.5)
+        # print(scores[0,0,0])
         scores = scores + attn_bias                # ★ 可微的偏置
         w = torch.softmax(scores, dim=-1)          # [B,H,Q,Nx]
         oh = torch.einsum('bhqk,bhkd->bhqd', w, vh)
@@ -391,7 +391,7 @@ class BoQWithProtoMask(nn.Module):
         # ---- Step 3: add mask to cross-attn logits ----
         alpha = float(self._alpha.item())
         if alpha > 0:
-            log_bias = alpha * torch.log(T * self.eps)     # [B,Q,Nx]
+            log_bias = T
             attn_mask = self.mask_gain * log_bias.unsqueeze(1).repeat(1, H, 1, 1)
             # attn_mask = torch.clamp(attn_mask, min=-5.0, max=5.0)  # 限制数值范围
         else:
@@ -449,7 +449,7 @@ class BoQ(torch.nn.Module):
         
         self.slot_mask = slot_mask
         in_dim = in_channels
-        # self.norm_input = torch.nn.LayerNorm(in_dim)
+        self.norm_input = torch.nn.LayerNorm(in_dim)
         if slot_mask:
             self.boqs = torch.nn.ModuleList([
                 BoQWithProtoMask(in_dim, num_queries, num_clusters=num_clusters, nheads=in_dim//64) for _ in range(num_layers)])
@@ -463,8 +463,9 @@ class BoQ(torch.nn.Module):
         # reduce input dimension using 3x3 conv when using ResNet
         # x = self.proj_c(x)
         # x = x.flatten(2).permute(0, 2, 1)
-        # x = self.norm_input(x)
-        
+        x = self.norm_input(x)
+        cls = self.norm_input(cls)
+
         outs = []
         attns = []
         masks = []

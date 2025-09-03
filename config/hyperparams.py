@@ -27,10 +27,11 @@ class HyperParams:
             # "pitts250k-test": "./data/val/pitts",      # path to the pitts250k-test dataset
             "nordland": "./data/val/Nordland",                #
             # "nordland_10": "./data/val/Nordland",          # path to the nordland_10 dataset
+            "sped": "./data/val/SPEDTEST",                      # path to the SPED dataset
         }
         
         ## Training config:
-        self.batch_size: int = 160         # batch size is the number of places per batch
+        self.batch_size: int = 180         # batch size is the number of places per batch
         self.img_per_place: int = 4          # number of images per place
         self.max_epochs: int = 40
         self.warmup_epochs: int = 10         # number of linear warmup epochs (not iterations)

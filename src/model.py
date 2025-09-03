@@ -339,7 +339,7 @@ class BoQModel(L.LightningModule):
                     queries=query_tensor[0],
                     global_step=self.trainer.global_step
                 )
-            if attn_masks is not None and len(attn_masks) > 0:
+            if attn_masks is not None and len(attn_masks) > 0 and attn_masks[0] is not None:
                 # Move each mask to CPU first, then concatenate to avoid GPU memory issues
                 attn_masks_cpu = [mask.squeeze(-1).detach().cpu() for mask in attn_masks]
                 attn_masks = torch.cat(attn_masks_cpu, dim=0)
@@ -352,12 +352,13 @@ class BoQModel(L.LightningModule):
             if R is not None and s is not None:
                 # log the R_hat and slot masks
                 for i, r in enumerate(R):
-                    plot_R_hat(
-                        writer=self.logger.experiment,
-                        tag=f"R_hat/layer_{i+1}",
-                        R_hat=r,
-                        global_step=self.trainer.global_step
-                    )
+                    if r is not None:
+                        plot_R_hat(
+                            writer=self.logger.experiment,
+                            tag=f"R_hat/layer_{i+1}",
+                            R_hat=r,
+                            global_step=self.trainer.global_step
+                        )
                 for i, similar in enumerate(s):
                     if similar is not None:
                         plot_similarity_matrix(

@@ -15,7 +15,7 @@ from src.dataloaders import GSVCitiesDataset
 from src.dataloaders import PittsburghDataset
 from src.dataloaders import MapillarySLSDataset
 from src.dataloaders import NordlandDataset
-from src.dataloaders import NordlandDataset_10
+from src.dataloaders import SPEDDataset
 
 class VPRDataModule(L.LightningDataModule):
     def __init__(
@@ -93,9 +93,9 @@ class VPRDataModule(L.LightningDataModule):
                     transform=self.val_transform
                 )
                 self.val_datasets.append(val_ds)
-            if "nordland_10" in self.val_sets:
-                val_ds = NordlandDataset_10(
-                    dataset_path=self.val_sets["nordland_10"],
+            if "sped" in self.val_sets:
+                val_ds = SPEDDataset(
+                    dataset_path=self.val_sets["sped"],
                     transform=self.val_transform
                 )
                 self.val_datasets.append(val_ds)
